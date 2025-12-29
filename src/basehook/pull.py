@@ -1,4 +1,3 @@
-from ast import Raise
 import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -102,6 +101,7 @@ async def last_revision(buffer_in_seconds: int = 0) -> AsyncGenerator[Any, None]
                 # we have something to process, break
                 break
 
+        status = ThreadUpdateStatus.SUCCESS
         try:
             yield latest_update.content
         except Exception:
@@ -117,7 +117,6 @@ async def last_revision(buffer_in_seconds: int = 0) -> AsyncGenerator[Any, None]
                 )
                 .values(last_revision_number=latest_update.revision_number)
             )
-            status = ThreadUpdateStatus.SUCCESS
         finally:
             await conn.execute(
                 update(thread_update_table)

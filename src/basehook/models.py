@@ -10,6 +10,8 @@ from sqlalchemy import (
     String,
     Table,
     UniqueConstraint,
+)
+from sqlalchemy import (
     Enum as SQLAlchemyEnum,
 )
 

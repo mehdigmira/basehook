@@ -40,6 +40,31 @@ def _get_revision_number(json: Any, path: list[str]) -> float:
         return revision_number
 
 
+@app.get("/api/thread-updates")
+async def get_thread_updates(limit: int = 100):
+    """Get recent thread updates for the dashboard."""
+    async with get_engine().begin() as conn:
+        result = await conn.execute(
+            select(thread_update_table)
+            .order_by(thread_update_table.c.timestamp.desc())
+            .limit(limit)
+        )
+        updates = result.all()
+
+        return [
+            {
+                "id": f"{u.webhook_name}-{u.thread_id}-{u.revision_number}",
+                "webhook_name": u.webhook_name,
+                "thread_id": u.thread_id,
+                "revision_number": u.revision_number,
+                "content": u.content,
+                "timestamp": u.timestamp,
+                "status": u.status.value if hasattr(u.status, "value") else str(u.status),
+            }
+            for u in updates
+        ]
+
+
 @app.post("/{webhook_name}")
 async def read_root(webhook_name: str, request: Request):
     async with get_engine().begin() as conn:
