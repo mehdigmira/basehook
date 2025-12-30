@@ -1,0 +1,43 @@
+# Development files
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+*.cover
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Documentation
+*.md
+!README.md
+
+# Git
+.git/
+.gitignore
+
+# Frontend (if deploying backend only)
+frontend/
+
+# Seed data (optional - uncomment if you don't want to deploy seed script)
+# seed_data.sql
+
+# Example files
+example_usage.py
