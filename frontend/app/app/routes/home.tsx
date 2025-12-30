@@ -1,53 +1,15 @@
 import { useState, useEffect } from "react"
 import type { Route } from "./+types/home"
-import { useQueryState, parseAsInteger, parseAsString, parseAsArrayOf } from "nuqs"
+import { useQueryState, parseAsInteger, parseAsString } from "nuqs"
 import { WebhookDataTable, type ThreadUpdate } from "~/components/webhook-data-table"
 
 export function meta({}: Route.MetaArgs) {
   return [
     { title: "Basehook Dashboard" },
-    { name: "description", content: "Monitor webhook updates and threads" },
+    { name: "description", content: "Monitor received updates" },
   ]
 }
 
-function generateDummyData(): ThreadUpdate[] {
-  const webhooks = ["test", "production", "staging", "development"]
-  const statuses: Array<"PENDING" | "SUCCESS" | "ERROR" | "SKIPPED"> = ["PENDING", "SUCCESS", "ERROR", "SKIPPED"]
-  const now = Date.now() / 1000
-
-  const data: ThreadUpdate[] = []
-
-  for (let i = 0; i < 100; i++) {
-    const webhook = webhooks[Math.floor(Math.random() * webhooks.length)]
-    const status = statuses[Math.floor(Math.random() * statuses.length)]
-    const threadId = `thread-${Math.floor(Math.random() * 20) + 1}`
-    const revision = Math.random() * 10
-
-    data.push({
-      id: `${i}`,
-      webhook_name: webhook,
-      thread_id: threadId,
-      revision_number: revision,
-      content: {
-        thread_id: threadId,
-        revision: revision,
-        data: `Update ${i}`,
-        payload: {
-          event: "webhook.received",
-          timestamp: now - (Math.random() * 86400),
-          metadata: {
-            source: webhook,
-            processed: status === "SUCCESS"
-          }
-        }
-      },
-      timestamp: now - (Math.random() * 86400),
-      status: status,
-    })
-  }
-
-  return data.sort((a, b) => b.timestamp - a.timestamp)
-}
 
 export default function Home() {
   const [updates, setUpdates] = useState<ThreadUpdate[]>([])
@@ -56,7 +18,7 @@ export default function Home() {
 
   // Each useQueryState automatically triggers re-render when URL changes
   const [page] = useQueryState("page", parseAsInteger.withDefault(1))
-  const [filters] = useQueryState("filters", parseAsString)
+  const [filters, setFilters] = useQueryState("filters", parseAsString)
   const [sort] = useQueryState("sort", parseAsString)
   const [perPage] = useQueryState("perPage", parseAsInteger.withDefault(10))
 
@@ -69,17 +31,31 @@ export default function Home() {
     const fetchUpdates = async () => {
       setLoading(true)
       try {
-        // Build query params for Python backend
-        const apiParams = new URLSearchParams()
-        apiParams.set("page", page.toString())
-        apiParams.set("per_page", perPage.toString())
+        // Build request body for Python backend
+        const requestBody: any = {
+          page,
+          per_page: perPage,
+        }
 
-        if (filters) apiParams.set("filters", filters)
-        if (sort) apiParams.set("sort", sort)
+        // Parse and add filters if present
+        if (filters) {
+          requestBody.filters = filters
+        }
 
-        console.log("[Client] Fetching with params:", { page, perPage, filters, sort })
+        // Parse and add sort if present
+        if (sort) {
+          requestBody.sort = sort
+        }
 
-        const response = await fetch(`/api/thread-updates?${apiParams}`)
+        console.log("[Client] Fetching with body:", requestBody)
+
+        const response = await fetch("/api/query", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(requestBody),
+        })
 
         if (!response.ok) {
           throw new Error("Failed to fetch updates")
@@ -88,31 +64,19 @@ export default function Home() {
         const data = await response.json()
 
         // Expected response format from Python backend:
-        // { "updates": [...], "total": 123 }
+        // { "updates": [...], "total": 123, "page": 1, "per_page": 10, "total_pages": 13 }
         setUpdates(data.updates || [])
-        setPageCount(Math.ceil((data.total || 0) / perPage))
+        setPageCount(data.total_pages || Math.ceil((data.total || 0) / perPage))
 
         console.log("[Client] Fetched from backend:", {
           total: data.total,
+          totalPages: data.total_pages,
           updateCount: data.updates?.length || 0
         })
       } catch (error) {
-        console.error("Failed to fetch updates, using dummy data:", error)
+        console.error("Failed to fetch updates")
 
-        // Fallback to dummy data
-        const dummyData = generateDummyData()
-
-        // Apply pagination
-        const start = (page - 1) * perPage
-        const paginated = dummyData.slice(start, start + perPage)
-
-        setUpdates(paginated)
-        setPageCount(Math.ceil(dummyData.length / perPage))
-
-        console.log("[Client] Using dummy data:", {
-          total: dummyData.length,
-          updateCount: paginated.length
-        })
+  
       } finally {
         setLoading(false)
       }
@@ -122,15 +86,73 @@ export default function Home() {
   }, [page, perPage, filters, sort]) // Re-fetch when any param changes
 
   const handleRefresh = () => {
-    // Trigger re-fetch by updating a dependency
+    // Re-fetch data by toggling a dependency (force re-fetch)
+    const currentPage = page
+    // Trigger re-fetch by updating query params slightly
     window.location.reload()
+  }
+
+  const handleBulkAction = async (action: "reenqueue" | "skip", isAllSelected: boolean, selectedIds: number[]) => {
+    try {
+      // Map action to status
+      const newStatus = action === "skip" ? "skipped" : "pending"
+      const newStatusUpper = newStatus.toUpperCase()
+
+      const requestBody: any = {
+        status: newStatusUpper,
+      }
+
+      if (isAllSelected) {
+        // Send filters to update all matching records
+        if (filters) {
+          requestBody.filters = filters
+        }
+      } else {
+        // Send specific IDs
+        requestBody.ids = selectedIds.map(id => parseInt(id))
+      }
+
+      // Optimistic update - update UI immediately
+      setUpdates(prevUpdates => {
+        return prevUpdates.map(update => {
+          // Check if this update should be updated
+          const shouldUpdate = isAllSelected
+            ? true // Update all for now (filter matching would be complex)
+            : selectedIds.includes(update.id)
+
+          if (shouldUpdate) {
+            return { ...update, status: newStatus as ThreadUpdate["status"] }
+          }
+          return update
+        })
+      })
+
+      const response = await fetch("/api/update-status", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestBody),
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to update status")
+        // Revert optimistic update on error
+        // Could re-fetch here, but for now just log
+      }
+
+      const data = await response.json()
+      console.log(`[Client] Updated ${data.updated} records to ${newStatusUpper}`)
+    } catch (error) {
+      console.error("[Client] Failed to update status:", error)
+    }
   }
 
   return (
     <div className="container mx-auto py-10">
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Webhook Dashboard</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Inbox</h1>
           <p className="text-muted-foreground">
             Monitor and manage webhook thread updates
           </p>
@@ -141,6 +163,7 @@ export default function Home() {
           pageCount={pageCount}
           onRefresh={handleRefresh}
           loading={loading}
+          onBulkAction={handleBulkAction}
         />
       </div>
     </div>

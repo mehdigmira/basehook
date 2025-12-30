@@ -1,29 +1,30 @@
 "use client"
 
-import type { Column, ColumnDef } from "@tanstack/react-table"
+import type { Column, ColumnDef, Table } from "@tanstack/react-table"
 import { DataTableAdvancedToolbar } from "components/data-table/data-table-advanced-toolbar"
 import { DataTableFilterMenu } from "components/data-table/data-table-filter-menu"
 import { DataTablePagination } from "components/data-table/data-table-pagination"
 import { DataTableSortList } from "components/data-table/data-table-sort-list"
-import { RefreshCw } from "lucide-react"
+import { RefreshCw, RotateCcw, SkipForward } from "lucide-react"
 import * as React from "react"
 
 import { DataTable } from "~/components/data-table/data-table"
 import { DataTableColumnHeader } from "~/components/data-table/data-table-column-header"
 import { DataTableToolbar } from "~/components/data-table/data-table-toolbar"
+import { ActionBar } from "~/components/ui/action-bar"
 import { Badge } from "~/components/ui/badge"
 import { Button } from "~/components/ui/button"
 import { Checkbox } from "~/components/ui/checkbox"
 import { useDataTable } from "~/hooks/use-data-table"
 
 export interface ThreadUpdate {
-  id: string
+  id: number
   webhook_name: string
   thread_id: string
   revision_number: number
   content: any
   timestamp: number
-  status: "PENDING" | "SUCCESS" | "ERROR" | "SKIPPED"
+  status: "pending" | "success" | "error" | "skipped"
 }
 
 interface WebhookDataTableProps {
@@ -31,20 +32,59 @@ interface WebhookDataTableProps {
   pageCount?: number
   onRefresh?: () => void
   loading?: boolean
+  onBulkAction?: (action: "reenqueue" | "skip", isAllSelected: boolean, selectedIds: number[]) => void
 }
 
-const statusVariants: Record<
-  string,
-  "success" | "error" | "pending" | "skipped"
-> = {
-  SUCCESS: "success",
-  ERROR: "error",
-  PENDING: "pending",
-  SKIPPED: "skipped",
-}
 
 const formatTimestamp = (timestamp: number) => {
   return new Date(timestamp * 1000).toLocaleString()
+}
+
+function TableActionBar({
+  table,
+  isAllSelected,
+  onAction,
+}: {
+  table: Table<ThreadUpdate>
+  isAllSelected: boolean
+  onAction: (action: "reenqueue" | "skip", isAllSelected: boolean, selectedIds: number[]) => void
+}) {
+  const rows = table.getFilteredSelectedRowModel().rows
+  const selectedCount = isAllSelected ? "all" : rows.length
+
+  const onOpenChange = React.useCallback(
+    (open: boolean) => {
+      if (!open) {
+        table.toggleAllRowsSelected(false)
+      }
+    },
+    [table]
+  )
+
+  const handleAction = (action: "reenqueue" | "skip") => {
+    const selectedIds = rows.map((r) => r.original.id)
+    onAction(action, isAllSelected, selectedIds)
+    table.toggleAllRowsSelected(false)
+  }
+
+  return (
+    <ActionBar open={rows.length > 0 || isAllSelected} onOpenChange={onOpenChange}>
+      <div className="flex items-center gap-3">
+        <span className="text-sm font-medium">
+          {selectedCount === "all" ? "All updates" : `${selectedCount} update${selectedCount === 1 ? "" : "s"}`} selected
+        </span>
+        <div className="h-4 w-px bg-border" />
+        <Button variant="outline" size="sm" onClick={() => handleAction("reenqueue")}>
+          <RotateCcw className="mr-2 h-4 w-4" />
+          Re-queue
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => handleAction("skip")}>
+          <SkipForward className="mr-2 h-4 w-4" />
+          Skip
+        </Button>
+      </div>
+    </ActionBar>
+  )
 }
 
 export function WebhookDataTable({
@@ -52,18 +92,14 @@ export function WebhookDataTable({
   pageCount = -1,
   onRefresh,
   loading,
+  onBulkAction,
 }: WebhookDataTableProps) {
-  // Count updates by status (for display only - server handles actual filtering)
-  const statusCounts = React.useMemo(
-    () => ({
-      all: updates.length,
-      success: updates.filter((u) => u.status === "SUCCESS").length,
-      error: updates.filter((u) => u.status === "ERROR").length,
-      pending: updates.filter((u) => u.status === "PENDING").length,
-      skipped: updates.filter((u) => u.status === "SKIPPED").length,
-    }),
-    [updates]
-  )
+  const [isAllSelected, setIsAllSelected] = React.useState(false)
+
+  const handleBulkAction = (action: "reenqueue" | "skip", isAll: boolean, selectedIds: number[]) => {
+    onBulkAction?.(action, isAll, selectedIds)
+    setIsAllSelected(false)
+  }
 
   const columns = React.useMemo<ColumnDef<ThreadUpdate>[]>(
     () => [
@@ -72,19 +108,28 @@ export function WebhookDataTable({
         header: ({ table }) => (
           <Checkbox
             checked={
+              isAllSelected ||
               table.getIsAllPageRowsSelected() ||
               (table.getIsSomePageRowsSelected() && "indeterminate")
             }
-            onCheckedChange={(value) =>
-              table.toggleAllPageRowsSelected(!!value)
-            }
+            onCheckedChange={(value) => {
+              if (value) {
+                table.toggleAllPageRowsSelected(true)
+              } else {
+                table.toggleAllPageRowsSelected(false)
+                setIsAllSelected(false)
+              }
+            }}
             aria-label="Select all"
           />
         ),
         cell: ({ row }) => (
           <Checkbox
-            checked={row.getIsSelected()}
-            onCheckedChange={(value) => row.toggleSelected(!!value)}
+            checked={isAllSelected || row.getIsSelected()}
+            onCheckedChange={(value) => {
+              row.toggleSelected(!!value)
+              if (!value) setIsAllSelected(false)
+            }}
             aria-label="Select row"
           />
         ),
@@ -143,7 +188,7 @@ export function WebhookDataTable({
         ),
         cell: ({ cell }) => {
           const status = cell.getValue<ThreadUpdate["status"]>()
-          return <Badge variant={statusVariants[status]}>{status}</Badge>
+          return <Badge variant={status}>{status}</Badge>
         },
         meta: {
           label: "Status",
@@ -164,8 +209,7 @@ export function WebhookDataTable({
         ),
         cell: ({ cell }) => {
           const timestamp = cell.getValue<ThreadUpdate["timestamp"]>()
-          // return <div className="text-sm">{formatTimestamp(timestamp)}</div>
-          return <div className="text-sm">-</div>
+          return <div className="text-sm">{formatTimestamp(timestamp)}</div>
         },
       },
       {
@@ -185,7 +229,7 @@ export function WebhookDataTable({
         enableSorting: false,
       },
     ],
-    []
+    [isAllSelected]
   )
 
   const { table } = useDataTable({
@@ -199,20 +243,22 @@ export function WebhookDataTable({
       },
       sorting: [{ id: "timestamp", desc: true }],
     },
-    getRowId: (row) => row.id,
+    getRowId: (row) => row.id.toString(),
   })
+
+  // Show "select all" banner when all on page are selected but not all overall
+  const showSelectAllBanner =
+    table.getIsAllPageRowsSelected() &&
+    !isAllSelected &&
+    table.getFilteredRowModel().rows.length > 0
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">
-            {updates.length} updates on this page
-          </span>
-          <span className="text-sm text-muted-foreground">
-            ({statusCounts.success} success, {statusCounts.error} failed,{" "}
-            {statusCounts.pending} pending)
-          </span>
+        <div className="text-sm text-muted-foreground">
+          {table.getFilteredSelectedRowModel().rows.length} of{" "}
+          {table.getFilteredRowModel().rows.length} row(s) selected
+          {isAllSelected && " (all pages)"}
         </div>
         <Button
           onClick={onRefresh}
@@ -225,7 +271,45 @@ export function WebhookDataTable({
         </Button>
       </div>
 
-      <DataTable table={table}>
+      {showSelectAllBanner && (
+        <div className="flex items-center justify-between rounded-md border border-blue-200 bg-blue-50 px-4 py-2 text-sm dark:border-blue-900 dark:bg-blue-950">
+          <span className="text-blue-900 dark:text-blue-100">
+            All {updates.length} updates on this page are selected.
+          </span>
+          <Button
+            variant="link"
+            size="sm"
+            className="text-blue-700 dark:text-blue-300"
+            onClick={() => setIsAllSelected(true)}
+          >
+            Select all updates across all pages
+          </Button>
+        </div>
+      )}
+
+      {isAllSelected && (
+        <div className="flex items-center justify-between rounded-md border border-blue-200 bg-blue-50 px-4 py-2 text-sm dark:border-blue-900 dark:bg-blue-950">
+          <span className="font-medium text-blue-900 dark:text-blue-100">
+            All updates across all pages are selected.
+          </span>
+          <Button
+            variant="link"
+            size="sm"
+            className="text-blue-700 dark:text-blue-300"
+            onClick={() => {
+              setIsAllSelected(false)
+              table.toggleAllPageRowsSelected(false)
+            }}
+          >
+            Clear selection
+          </Button>
+        </div>
+      )}
+
+      <DataTable
+        table={table}
+        actionBar={<TableActionBar table={table} isAllSelected={isAllSelected} onAction={handleBulkAction} />}
+      >
         <DataTableAdvancedToolbar table={table}>
           <DataTableFilterMenu table={table} />
           <DataTableSortList table={table} />

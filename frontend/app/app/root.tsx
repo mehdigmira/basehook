@@ -9,6 +9,7 @@ import {
 import { NuqsAdapter } from "nuqs/adapters/react-router/v7";
 
 import type { Route } from "./+types/root";
+import { Nav } from "./components/nav";
 import "./app.css";
 
 export const links: Route.LinksFunction = () => [
@@ -44,9 +45,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
-  <NuqsAdapter>
-    <Outlet />
-  </NuqsAdapter>
+    <NuqsAdapter>
+      <Nav />
+      <Outlet />
+    </NuqsAdapter>
   );
 }
 

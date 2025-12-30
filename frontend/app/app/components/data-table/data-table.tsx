@@ -87,16 +87,19 @@ export const dataTableConfig = {
 
 interface DataTableProps<TData> extends React.HTMLAttributes<HTMLDivElement> {
   table: TanstackTable<TData>
+  actionBar?: React.ReactNode
 }
 
 export function DataTable<TData>({
   table,
   children,
+  actionBar,
   ...props
 }: DataTableProps<TData>) {
   return (
     <div className="w-full space-y-2.5 overflow-auto" {...props}>
       {children}
+      {actionBar}
       <div className="rounded-md border">
         <Table>
           <TableHeader>

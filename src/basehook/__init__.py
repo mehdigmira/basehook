@@ -2,6 +2,6 @@
 
 __version__ = "0.1.0"
 
-from basehook.api import app
+from basehook.core import Basehook
 
-__all__ = ["app"]
+__all__ = ["Basehook"]
