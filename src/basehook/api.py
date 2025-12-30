@@ -109,6 +109,7 @@ async def query_thread_updates(request: Request):
         {
             "page": 1,
             "per_page": 10,
+            "range": "24h",  // Optional: 1h, 6h, 24h, 7d, 30d, all
             "filters": [
                 {"id": "thread_id", "value": "thread-1"},
                 {"id": "webhook_name", "value": "test"},
@@ -134,13 +135,30 @@ async def query_thread_updates(request: Request):
     page = body.get("page", 1)
     per_page = body.get("per_page", 10)
 
-    # Extract filters and sort
+    # Extract filters, sort, and time range
     filters = body.get("filters", [])
     sorts = body.get("sort", [])
+    time_range = body.get("range", "all")
+
+    # Calculate time range cutoff
+    range_seconds = {
+        "1h": 3600,
+        "6h": 6 * 3600,
+        "24h": 24 * 3600,
+        "7d": 7 * 24 * 3600,
+        "30d": 30 * 24 * 3600,
+        "all": None,
+    }
+    cutoff_seconds = range_seconds.get(time_range, None)
+    cutoff_timestamp = time.time() - cutoff_seconds if cutoff_seconds else None
 
     async with basehook.engine.begin() as conn:
         # Build base query
         query = select(thread_update_table)
+
+        # Apply time range filter
+        if cutoff_timestamp is not None:
+            query = query.where(thread_update_table.c.timestamp >= cutoff_timestamp)
 
         # Apply filters
         query = apply_filters_to_query(query, filters)
@@ -254,6 +272,105 @@ async def update_status(request: Request):
         updated_count = result.rowcount
 
         return {"updated": updated_count}
+
+
+@app.get("/api/metrics")
+async def get_metrics(range: str = "24h"):
+    """
+    Get cumulative metrics for thread updates by status over time.
+    Groups data into 10-second windows for better performance.
+
+    Query params:
+        range: Time range to fetch (1h, 6h, 24h, 7d, 30d, all). Default: 24h
+
+    Returns:
+        {
+            "data": [
+                {
+                    "timestamp": 1234567890,
+                    "date": "2024-01-01 12:00:00",
+                    "pending": 10,
+                    "success": 5,
+                    "error": 2,
+                    "skipped": 1
+                },
+                ...
+            ]
+        }
+    """
+    from sqlalchemy import Integer
+
+    # Calculate cutoff timestamp and window size based on range
+    range_config = {
+        "1h": {"seconds": 3600, "window": 10},  # 10s windows for 1h
+        "6h": {"seconds": 6 * 3600, "window": 60},  # 1min windows for 6h
+        "24h": {"seconds": 24 * 3600, "window": 300},  # 5min windows for 24h
+        "7d": {"seconds": 7 * 24 * 3600, "window": 3600},  # 1h windows for 7d
+        "30d": {"seconds": 30 * 24 * 3600, "window": 4 * 3600},  # 4h windows for 30d
+        "all": {"seconds": None, "window": 24 * 3600},  # 1d windows for all time
+    }
+
+    config = range_config.get(range, range_config["24h"])
+    cutoff_seconds = config["seconds"]
+    window_size = config["window"]
+    cutoff_timestamp = time.time() - cutoff_seconds if cutoff_seconds else None
+
+    async with basehook.engine.begin() as conn:
+        # Group by dynamic windows based on time range
+        window_expr = (thread_update_table.c.timestamp / window_size).cast(Integer) * window_size
+
+        query = select(
+            window_expr.label("window_timestamp"),
+            thread_update_table.c.status,
+            func.count().label("count"),
+        )
+
+        # Apply time range filter if not "all"
+        if cutoff_timestamp is not None:
+            query = query.where(thread_update_table.c.timestamp >= cutoff_timestamp)
+
+        query = query.group_by(window_expr, thread_update_table.c.status).order_by(
+            window_expr.asc(), thread_update_table.c.status.asc()
+        )
+
+        result = await conn.execute(query)
+        rows = result.all()
+
+        # Build cumulative counts
+        cumulative = {ThreadUpdateStatus.PENDING: 0, ThreadUpdateStatus.SUCCESS: 0, ThreadUpdateStatus.ERROR: 0, ThreadUpdateStatus.SKIPPED: 0}
+        data_points = []
+        current_window = None
+
+        for row in rows:
+            # Accumulate count for this status
+            if row.status in cumulative:
+                cumulative[row.status] += row.count
+
+            # If we hit a new window, push a data point with current cumulative totals
+            if current_window is not None and row.window_timestamp != current_window:
+                data_points.append({
+                    "timestamp": current_window,
+                    "date": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(current_window)),
+                    "pending": cumulative[ThreadUpdateStatus.PENDING],
+                    "success": cumulative[ThreadUpdateStatus.SUCCESS],
+                    "error": cumulative[ThreadUpdateStatus.ERROR],
+                    "skipped": cumulative[ThreadUpdateStatus.SKIPPED],
+                })
+
+            current_window = row.window_timestamp
+
+        # Don't forget the last window
+        if current_window is not None:
+            data_points.append({
+                "timestamp": current_window,
+                "date": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(current_window)),
+                "pending": cumulative[ThreadUpdateStatus.PENDING],
+                "success": cumulative[ThreadUpdateStatus.SUCCESS],
+                "error": cumulative[ThreadUpdateStatus.ERROR],
+                "skipped": cumulative[ThreadUpdateStatus.SKIPPED],
+            })
+
+        return {"data": data_points}
 
 
 @app.post("/{webhook_name}")

@@ -5,7 +5,7 @@ import { DataTableAdvancedToolbar } from "components/data-table/data-table-advan
 import { DataTableFilterMenu } from "components/data-table/data-table-filter-menu"
 import { DataTablePagination } from "components/data-table/data-table-pagination"
 import { DataTableSortList } from "components/data-table/data-table-sort-list"
-import { RefreshCw, RotateCcw, SkipForward } from "lucide-react"
+import { RotateCcw, SkipForward } from "lucide-react"
 import * as React from "react"
 
 import { DataTable } from "~/components/data-table/data-table"
@@ -29,9 +29,8 @@ export interface ThreadUpdate {
 
 interface WebhookDataTableProps {
   updates: ThreadUpdate[]
-  pageCount?: number
-  onRefresh?: () => void
-  loading?: boolean
+  pageCount?: number,
+  rowCount?: number,
   onBulkAction?: (action: "reenqueue" | "skip", isAllSelected: boolean, selectedIds: number[]) => void
 }
 
@@ -90,8 +89,7 @@ function TableActionBar({
 export function WebhookDataTable({
   updates,
   pageCount = -1,
-  onRefresh,
-  loading,
+  rowCount = 0,
   onBulkAction,
 }: WebhookDataTableProps) {
   const [isAllSelected, setIsAllSelected] = React.useState(false)
@@ -254,23 +252,6 @@ export function WebhookDataTable({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="text-sm text-muted-foreground">
-          {table.getFilteredSelectedRowModel().rows.length} of{" "}
-          {table.getFilteredRowModel().rows.length} row(s) selected
-          {isAllSelected && " (all pages)"}
-        </div>
-        <Button
-          onClick={onRefresh}
-          disabled={loading}
-          variant="outline"
-          size="sm"
-        >
-          <RefreshCw className={loading ? "animate-spin" : ""} />
-          Refresh
-        </Button>
-      </div>
-
       {showSelectAllBanner && (
         <div className="flex items-center justify-between rounded-md border border-blue-200 bg-blue-50 px-4 py-2 text-sm dark:border-blue-900 dark:bg-blue-950">
           <span className="text-blue-900 dark:text-blue-100">
@@ -313,6 +294,9 @@ export function WebhookDataTable({
         <DataTableAdvancedToolbar table={table}>
           <DataTableFilterMenu table={table} />
           <DataTableSortList table={table} />
+          <div className="text-sm text-muted-foreground">
+            {rowCount} row(s) found
+          </div>
         </DataTableAdvancedToolbar>
       </DataTable>
       <DataTablePagination table={table} />

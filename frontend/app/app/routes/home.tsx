@@ -2,6 +2,15 @@ import { useState, useEffect } from "react"
 import type { Route } from "./+types/home"
 import { useQueryState, parseAsInteger, parseAsString } from "nuqs"
 import { WebhookDataTable, type ThreadUpdate } from "~/components/webhook-data-table"
+import { RefreshCw } from "lucide-react"
+import { Button } from "~/components/ui/button"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/ui/select"
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -14,6 +23,7 @@ export function meta({}: Route.MetaArgs) {
 export default function Home() {
   const [updates, setUpdates] = useState<ThreadUpdate[]>([])
   const [pageCount, setPageCount] = useState(1)
+  const [rowCount, setRowCount] = useState(0)
   const [loading, setLoading] = useState(false)
 
   // Each useQueryState automatically triggers re-render when URL changes
@@ -21,6 +31,7 @@ export default function Home() {
   const [filters, setFilters] = useQueryState("filters", parseAsString)
   const [sort] = useQueryState("sort", parseAsString)
   const [perPage] = useQueryState("perPage", parseAsInteger.withDefault(10))
+  const [timeRange, setTimeRange] = useQueryState("range", parseAsString.withDefault("all"))
 
   useEffect(() => {
     console.log("[Client] Params changed:", { page, filters, sort })
@@ -35,6 +46,7 @@ export default function Home() {
         const requestBody: any = {
           page,
           per_page: perPage,
+          range: timeRange,
         }
 
         // Parse and add filters if present
@@ -67,6 +79,7 @@ export default function Home() {
         // { "updates": [...], "total": 123, "page": 1, "per_page": 10, "total_pages": 13 }
         setUpdates(data.updates || [])
         setPageCount(data.total_pages || Math.ceil((data.total || 0) / perPage))
+        setRowCount(data.total || 0)
 
         console.log("[Client] Fetched from backend:", {
           total: data.total,
@@ -83,12 +96,10 @@ export default function Home() {
     }
 
     fetchUpdates()
-  }, [page, perPage, filters, sort]) // Re-fetch when any param changes
+  }, [page, perPage, filters, sort, timeRange]) // Re-fetch when any param changes
 
   const handleRefresh = () => {
-    // Re-fetch data by toggling a dependency (force re-fetch)
-    const currentPage = page
-    // Trigger re-fetch by updating query params slightly
+    // Re-fetch data by forcing a window reload
     window.location.reload()
   }
 
@@ -109,7 +120,7 @@ export default function Home() {
         }
       } else {
         // Send specific IDs
-        requestBody.ids = selectedIds.map(id => parseInt(id))
+        requestBody.ids = selectedIds
       }
 
       // Optimistic update - update UI immediately
@@ -151,18 +162,43 @@ export default function Home() {
   return (
     <div className="container mx-auto py-10">
       <div className="space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Inbox</h1>
-          <p className="text-muted-foreground">
-            Monitor and manage webhook thread updates
-          </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Inbox</h1>
+            <p className="text-muted-foreground">
+              Monitor and manage webhook thread updates
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Select value={timeRange} onValueChange={setTimeRange}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Select time range" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="1h">Last hour</SelectItem>
+                <SelectItem value="6h">Last 6 hours</SelectItem>
+                <SelectItem value="24h">Last 24 hours</SelectItem>
+                <SelectItem value="7d">Last 7 days</SelectItem>
+                <SelectItem value="30d">Last 30 days</SelectItem>
+                <SelectItem value="all">All time</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              onClick={handleRefresh}
+              disabled={loading}
+              variant="outline"
+              size="sm"
+            >
+              <RefreshCw className={loading ? "animate-spin" : ""} />
+              Refresh
+            </Button>
+          </div>
         </div>
 
         <WebhookDataTable
           updates={updates}
           pageCount={pageCount}
-          onRefresh={handleRefresh}
-          loading={loading}
+          rowCount={rowCount}
           onBulkAction={handleBulkAction}
         />
       </div>
