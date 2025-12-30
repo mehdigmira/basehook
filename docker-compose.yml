@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: basehook
+      POSTGRES_PASSWORD: basehook
+      POSTGRES_DB: basehook
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U basehook"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://basehook:basehook@db:5432/basehook
+    depends_on:
+      db:
+        condition: service_healthy
+    command: uvicorn basehook.api:app --host 0.0.0.0 --port 8000
+
+volumes:
+  postgres_data:

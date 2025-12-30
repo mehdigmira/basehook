@@ -23,10 +23,16 @@ class Basehook:
     engine: AsyncEngine = field(init=False)
 
     def __post_init__(self):
-        self._database_url = self.database_url or os.getenv(
+        database_url = self.database_url or os.getenv(
             "DATABASE_URL",
             "postgresql+asyncpg://chiefskiss:chiefskiss@localhost:5445/chiefskiss",
         )
+
+        # Railway provides postgresql:// but we need postgresql+asyncpg://
+        if database_url.startswith("postgresql://"):
+            database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+        self._database_url = database_url
         self.engine = create_async_engine(
             self._database_url,
             pool_pre_ping=True,
