@@ -5,7 +5,7 @@ import { DataTableAdvancedToolbar } from "components/data-table/data-table-advan
 import { DataTableFilterMenu } from "components/data-table/data-table-filter-menu"
 import { DataTablePagination } from "components/data-table/data-table-pagination"
 import { DataTableSortList } from "components/data-table/data-table-sort-list"
-import { RotateCcw, SkipForward } from "lucide-react"
+import { RotateCcw, SkipForward, AlertCircle, ChartNoAxesColumn, ChartNoAxesGantt } from "lucide-react"
 import * as React from "react"
 
 import { DataTable } from "~/components/data-table/data-table"
@@ -15,7 +15,15 @@ import { ActionBar } from "~/components/ui/action-bar"
 import { Badge } from "~/components/ui/badge"
 import { Button } from "~/components/ui/button"
 import { Checkbox } from "~/components/ui/checkbox"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "~/components/ui/dialog"
 import { useDataTable } from "~/hooks/use-data-table"
+import { TooltipContent, Tooltip, TooltipTrigger } from "./ui/tooltip"
 
 export interface ThreadUpdate {
   id: number
@@ -25,6 +33,7 @@ export interface ThreadUpdate {
   content: any
   timestamp: number
   status: "pending" | "success" | "error" | "skipped"
+  traceback?: string | null
 }
 
 interface WebhookDataTableProps {
@@ -93,6 +102,10 @@ export function WebhookDataTable({
   onBulkAction,
 }: WebhookDataTableProps) {
   const [isAllSelected, setIsAllSelected] = React.useState(false)
+  const [tracebackDialog, setTracebackDialog] = React.useState<{ open: boolean; traceback: string | null }>({
+    open: false,
+    traceback: null,
+  })
 
   const handleBulkAction = (action: "reenqueue" | "skip", isAll: boolean, selectedIds: number[]) => {
     onBulkAction?.(action, isAll, selectedIds)
@@ -184,8 +197,35 @@ export function WebhookDataTable({
         header: ({ column }: { column: Column<ThreadUpdate, unknown> }) => (
           <DataTableColumnHeader column={column} label="Status" />
         ),
-        cell: ({ cell }) => {
-          const status = cell.getValue<ThreadUpdate["status"]>()
+        cell: ({ row }) => {
+          const status = row.getValue<ThreadUpdate["status"]>("status")
+          const traceback = row.original.traceback
+
+          if (status === "error" && traceback) {
+            return (
+              <div className="flex items-center gap-2">
+                <Badge variant={status}>{status}</Badge>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setTracebackDialog({ open: true, traceback })
+                        }}
+                        className="text-destructive hover:text-destructive/80 cursor-pointer"
+                        title="View error traceback"
+                      >
+                        <ChartNoAxesGantt className="h-4 w-4" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      View error traceback
+                    </TooltipContent>
+                  </Tooltip>
+              </div>
+            )
+          }
+
           return <Badge variant={status}>{status}</Badge>
         },
         meta: {
@@ -300,6 +340,22 @@ export function WebhookDataTable({
         </DataTableAdvancedToolbar>
       </DataTable>
       <DataTablePagination table={table} />
+
+      <Dialog open={tracebackDialog.open} onOpenChange={(open) => setTracebackDialog({ open, traceback: null })}>
+        <DialogContent className="max-w-3xl max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle>Error Traceback</DialogTitle>
+            <DialogDescription>
+              Full stack trace of the error that occurred while processing this update
+            </DialogDescription>
+          </DialogHeader>
+          <div className="overflow-auto">
+            <pre className="text-xs bg-muted p-4 rounded-lg whitespace-pre-wrap break-words">
+              {tracebackDialog.traceback}
+            </pre>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

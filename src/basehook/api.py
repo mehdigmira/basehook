@@ -9,6 +9,7 @@ from sqlalchemy import String, func, select, update as sql_update
 from sqlalchemy.dialects.postgresql import insert
 
 from basehook.core import Basehook
+from basehook.hmac_utils import verify_hmac_signature
 from basehook.models import (
     ThreadUpdateStatus,
     metadata,
@@ -203,6 +204,7 @@ async def query_thread_updates(request: Request):
                     "content": u.content,
                     "timestamp": u.timestamp,
                     "status": u.status.value if hasattr(u.status, "value") else str(u.status),
+                    "traceback": u.traceback,
                 }
                 for u in updates
             ],
@@ -373,6 +375,188 @@ async def get_metrics(range: str = "24h"):
         return {"data": data_points}
 
 
+@app.get("/api/webhooks")
+async def list_webhooks():
+    """
+    Get list of all configured webhooks.
+
+    Returns:
+        {
+            "webhooks": [
+                {
+                    "name": "my-webhook",
+                    "thread_id_path": ["event", "thread_ts"],
+                    "revision_number_path": ["event_time"],
+                    "hmac_enabled": true,
+                    "hmac_header": "X-Slack-Signature",
+                    ...
+                }
+            ]
+        }
+    """
+    async with basehook.engine.begin() as conn:
+        query = select(webhook_table).order_by(webhook_table.c.name.asc())
+        result = await conn.execute(query)
+        webhooks = result.all()
+
+        return {
+            "webhooks": [
+                {
+                    "name": w.name,
+                    "thread_id_path": w.thread_id_path,
+                    "revision_number_path": w.revision_number_path,
+                    "hmac_enabled": w.hmac_enabled,
+                    "hmac_secret": w.hmac_secret,
+                    "hmac_header": w.hmac_header,
+                    "hmac_timestamp_header": w.hmac_timestamp_header,
+                    "hmac_signature_format": w.hmac_signature_format,
+                    "hmac_encoding": w.hmac_encoding,
+                    "hmac_algorithm": w.hmac_algorithm,
+                    "hmac_prefix": w.hmac_prefix,
+                    "last_error": w.last_error,
+                    "last_error_timestamp": w.last_error_timestamp,
+                }
+                for w in webhooks
+            ]
+        }
+
+
+@app.post("/api/webhooks")
+async def create_webhook(request: Request):
+    """
+    Create a new webhook configuration.
+
+    Request body:
+        {
+            "name": "my-webhook",
+            "thread_id_path": ["event", "thread_ts"],
+            "revision_number_path": ["event_time"],
+            "hmac_enabled": false,
+            "hmac_secret": "optional-secret",
+            "hmac_header": "X-Signature",
+            "hmac_timestamp_header": "X-Timestamp",
+            "hmac_signature_format": "{body}",
+            "hmac_encoding": "hex",
+            "hmac_algorithm": "sha256",
+            "hmac_prefix": "sha256="
+        }
+
+    Returns:
+        {
+            "name": "my-webhook",
+            ...
+        }
+    """
+    body = await request.json()
+
+    # Validate required fields
+    if not body.get("name"):
+        raise HTTPException(status_code=400, detail="Webhook name is required")
+    if not body.get("thread_id_path"):
+        raise HTTPException(status_code=400, detail="thread_id_path is required")
+    if not body.get("revision_number_path"):
+        raise HTTPException(
+            status_code=400, detail="revision_number_path is required"
+        )
+
+    async with basehook.engine.begin() as conn:
+        # Check if webhook already exists
+        result = await conn.execute(
+            select(webhook_table).where(webhook_table.c.name == body["name"])
+        )
+        existing = result.first()
+        if existing:
+            raise HTTPException(
+                status_code=409, detail=f"Webhook '{body['name']}' already exists"
+            )
+
+        # Insert new webhook
+        await conn.execute(
+            insert(webhook_table).values(
+                name=body["name"],
+                thread_id_path=body["thread_id_path"],
+                revision_number_path=body["revision_number_path"],
+                hmac_enabled=body.get("hmac_enabled", False),
+                hmac_secret=body.get("hmac_secret"),
+                hmac_header=body.get("hmac_header"),
+                hmac_timestamp_header=body.get("hmac_timestamp_header"),
+                hmac_signature_format=body.get("hmac_signature_format"),
+                hmac_encoding=body.get("hmac_encoding"),
+                hmac_algorithm=body.get("hmac_algorithm"),
+                hmac_prefix=body.get("hmac_prefix"),
+            )
+        )
+
+        # Return the created webhook
+        result = await conn.execute(
+            select(webhook_table).where(webhook_table.c.name == body["name"])
+        )
+        webhook = result.first()
+
+        return {
+            "name": webhook.name,
+            "thread_id_path": webhook.thread_id_path,
+            "revision_number_path": webhook.revision_number_path,
+            "hmac_enabled": webhook.hmac_enabled,
+            "hmac_secret": webhook.hmac_secret,
+            "hmac_header": webhook.hmac_header,
+            "hmac_timestamp_header": webhook.hmac_timestamp_header,
+            "hmac_signature_format": webhook.hmac_signature_format,
+            "hmac_encoding": webhook.hmac_encoding,
+            "hmac_algorithm": webhook.hmac_algorithm,
+            "hmac_prefix": webhook.hmac_prefix,
+            "last_error": webhook.last_error,
+            "last_error_timestamp": webhook.last_error_timestamp,
+        }
+
+
+@app.put("/api/webhooks/{webhook_name}")
+async def update_webhook(webhook_name: str, request: Request):
+    """
+    Update an existing webhook configuration.
+
+    Request body:
+        {
+            "thread_id_path": ["event", "thread_ts"],
+            "revision_number_path": ["event_time"],
+            "hmac_enabled": true,
+            "hmac_secret": "new-secret",
+            ...
+        }
+
+    Returns:
+        {
+            "name": "my-webhook",
+            ...
+        }
+    """
+    body = await request.json()
+
+    async with basehook.engine.begin() as conn:
+        # Check if webhook exists
+        result = await conn.execute(
+            select(webhook_table).where(webhook_table.c.name == webhook_name)
+        )
+        existing = result.first()
+        if not existing:
+            raise HTTPException(
+                status_code=404, detail=f"Webhook '{webhook_name}' not found"
+            )
+
+
+
+
+
+        # Update webhook
+        await conn.execute(
+            sql_update(webhook_table)
+            .where(webhook_table.c.name == webhook_name)
+            .values(**body)
+        )
+
+
+
+
 @app.post("/{webhook_name}")
 async def read_root(webhook_name: str, request: Request):
     async with basehook.engine.begin() as conn:
@@ -383,7 +567,83 @@ async def read_root(webhook_name: str, request: Request):
         if webhook_row is None:
             raise HTTPException(status_code=404, detail="Webhook not found")
 
-        content = await request.json()
+        # Get raw body for HMAC verification (must read before .json())
+        body = await request.body()
+
+        # Verify HMAC signature if enabled
+        if webhook_row.hmac_enabled:
+            try:
+                if not webhook_row.hmac_secret:
+                    error_msg = "HMAC enabled but no secret configured"
+                    await conn.execute(
+                        sql_update(webhook_table)
+                        .where(webhook_table.c.name == webhook_name)
+                        .values(last_error=error_msg, last_error_timestamp=time.time())
+                    )
+                    raise HTTPException(status_code=500, detail=error_msg)
+
+                # Get signature from header
+                signature_header = webhook_row.hmac_header or "X-Webhook-Signature"
+                received_signature = request.headers.get(signature_header)
+                if not received_signature:
+                    error_msg = f"Missing signature header: {signature_header}"
+                    await conn.execute(
+                        sql_update(webhook_table)
+                        .where(webhook_table.c.name == webhook_name)
+                        .values(last_error=error_msg, last_error_timestamp=time.time())
+                    )
+                    raise HTTPException(status_code=401, detail=error_msg)
+
+                # Get timestamp from header if configured
+                timestamp = None
+                if webhook_row.hmac_timestamp_header:
+                    timestamp = request.headers.get(webhook_row.hmac_timestamp_header)
+
+                # Verify signature
+                is_valid = verify_hmac_signature(
+                    secret=webhook_row.hmac_secret,
+                    received_signature=received_signature,
+                    body=body,
+                    timestamp=timestamp,
+                    url=str(request.url),
+                    signature_format=webhook_row.hmac_signature_format or "{body}",
+                    encoding=webhook_row.hmac_encoding or "hex",
+                    prefix=webhook_row.hmac_prefix,
+                    algorithm=webhook_row.hmac_algorithm or "sha256",
+                )
+
+                if not is_valid:
+                    error_msg = "Invalid HMAC signature"
+                    await conn.execute(
+                        sql_update(webhook_table)
+                        .where(webhook_table.c.name == webhook_name)
+                        .values(last_error=error_msg, last_error_timestamp=time.time())
+                    )
+                    raise HTTPException(status_code=401, detail=error_msg)
+
+                # Clear error on successful validation
+                await conn.execute(
+                    sql_update(webhook_table)
+                    .where(webhook_table.c.name == webhook_name)
+                    .values(last_error=None, last_error_timestamp=None)
+                )
+
+            except HTTPException:
+                raise  # Re-raise HTTP exceptions
+            except Exception as e:
+                # Log unexpected errors
+                error_msg = f"HMAC validation error: {str(e)}"
+                await conn.execute(
+                    sql_update(webhook_table)
+                    .where(webhook_table.c.name == webhook_name)
+                    .values(last_error=error_msg, last_error_timestamp=time.time())
+                )
+                raise HTTPException(status_code=500, detail=error_msg) from e
+
+        # Parse JSON content from body
+        import json
+
+        content = json.loads(body)
 
         thread_id_value = _get_from_json(content, webhook_row.thread_id_path) or str(uuid4())
         if not isinstance(thread_id_value, str):

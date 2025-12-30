@@ -1,5 +1,6 @@
 import os
 import time
+import traceback
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -133,11 +134,13 @@ class Basehook:
                     break
 
             status = ThreadUpdateStatus.SUCCESS
+            error_traceback = None
             try:
                 yield latest_update.content
             except Exception:
                 # error processing the updates, mark the thread as error
                 status = ThreadUpdateStatus.ERROR
+                error_traceback = traceback.format_exc()
                 raise
             else:
                 await conn.execute(
@@ -152,6 +155,6 @@ class Basehook:
                 await conn.execute(
                     update(thread_update_table)
                     .where(thread_update_table.c.id == latest_update.id)
-                    .values(status=status)
+                    .values(status=status, traceback=error_traceback)
                 )
                 await conn.commit()

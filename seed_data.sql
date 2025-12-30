@@ -6,17 +6,6 @@
 -- TRUNCATE TABLE thread CASCADE;
 -- TRUNCATE TABLE webhook CASCADE;
 
--- Insert sample webhooks
-INSERT INTO webhook (name, thread_id_path, revision_number_path) VALUES
-    ('github', ARRAY['repository', 'id'], ARRAY['push', 'timestamp']),
-    ('stripe', ARRAY['data', 'object', 'id'], ARRAY['created']),
-    ('slack', ARRAY['event', 'channel'], ARRAY['event_ts']),
-    ('shopify', ARRAY['order', 'id'], ARRAY['updated_at']),
-    ('discord', ARRAY['guild_id'], ARRAY['timestamp']),
-    ('twilio', ARRAY['message_sid'], ARRAY['date_created']),
-    ('sendgrid', ARRAY['email_id'], ARRAY['timestamp']),
-    ('test', ARRAY['thread_id'], ARRAY['revision'])
-ON CONFLICT (name) DO NOTHING;
 
 -- Generate threads (500 threads across all webhooks)
 DO $$
@@ -60,6 +49,8 @@ DECLARE
     base_timestamp FLOAT;
     status_val TEXT;
     content_json JSONB;
+    traceback_text TEXT;
+    error_type INTEGER;
 BEGIN
     FOREACH webhook IN ARRAY webhook_names
     LOOP
@@ -78,6 +69,71 @@ BEGIN
                     WHEN random() < 0.9 THEN status_val := 'SKIPPED';
                     ELSE status_val := 'ERROR';
                 END CASE;
+
+                -- Generate realistic traceback for errors
+                traceback_text := NULL;
+                IF status_val = 'ERROR' THEN
+                    error_type := (random() * 5)::INTEGER;
+                    CASE error_type
+                        WHEN 0 THEN
+                            traceback_text := 'Traceback (most recent call last):
+  File "/app/basehook/pull.py", line 42, in process_update
+    result = await handler.process(update.content)
+  File "/app/handlers/webhook_handler.py", line 87, in process
+    data = self.parse_content(content)
+  File "/app/handlers/webhook_handler.py", line 123, in parse_content
+    return json.loads(content["data"])
+KeyError: ''data''
+
+The webhook payload is missing the required ''data'' field.';
+                        WHEN 1 THEN
+                            traceback_text := 'Traceback (most recent call last):
+  File "/app/basehook/pull.py", line 42, in process_update
+    result = await handler.process(update.content)
+  File "/app/handlers/webhook_handler.py", line 102, in process
+    await self.validate_schema(content)
+  File "/app/handlers/webhook_handler.py", line 156, in validate_schema
+    raise ValueError(f"Invalid revision number: {content[''revision'']}")
+ValueError: Invalid revision number: None
+
+Revision number cannot be None or missing.';
+                        WHEN 2 THEN
+                            traceback_text := 'Traceback (most recent call last):
+  File "/app/basehook/pull.py", line 42, in process_update
+    result = await handler.process(update.content)
+  File "/app/handlers/webhook_handler.py", line 67, in process
+    async with self.db.transaction():
+  File "/usr/local/lib/python3.11/site-packages/sqlalchemy/ext/asyncio/engine.py", line 346, in __aenter__
+    await self.start()
+  File "/usr/local/lib/python3.11/site-packages/sqlalchemy/ext/asyncio/engine.py", line 256, in start
+    self._connection = await self._engine.connect()
+asyncio.exceptions.TimeoutError: Database connection timeout after 30s';
+                        WHEN 3 THEN
+                            traceback_text := 'Traceback (most recent call last):
+  File "/app/basehook/pull.py", line 42, in process_update
+    result = await handler.process(update.content)
+  File "/app/handlers/' || webhook || '_handler.py", line 91, in process
+    user_id = int(content["user"]["id"])
+  File "/usr/local/lib/python3.11/site-packages/pydantic/main.py", line 234, in __getitem__
+    return self.__dict__[item]
+KeyError: ''user''
+
+The payload structure does not match expected schema for ' || webhook || ' webhooks.';
+                        ELSE
+                            traceback_text := 'Traceback (most recent call last):
+  File "/app/basehook/pull.py", line 42, in process_update
+    result = await handler.process(update.content)
+  File "/app/handlers/webhook_handler.py", line 78, in process
+    response = await self.http_client.post(webhook_url, json=payload)
+  File "/usr/local/lib/python3.11/site-packages/httpx/_client.py", line 1842, in post
+    return await self.request("POST", url, **kwargs)
+  File "/usr/local/lib/python3.11/site-packages/httpx/_client.py", line 1547, in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+httpx.ConnectError: [Errno 111] Connection refused
+
+Failed to connect to downstream service at https://api.example.com/' || webhook || '/events';
+                    END CASE;
+                END IF;
 
                 -- Generate realistic content based on webhook type
                 CASE webhook
@@ -170,14 +226,15 @@ BEGIN
                         );
                 END CASE;
 
-                INSERT INTO thread_update (webhook_name, thread_id, revision_number, content, timestamp, status)
+                INSERT INTO thread_update (webhook_name, thread_id, revision_number, content, timestamp, status, traceback)
                 VALUES (
                     webhook,
                     thread_id,
                     rev_num,
                     content_json,
                     base_timestamp,
-                    status_val::threadupdatestatus
+                    status_val::threadupdatestatus,
+                    traceback_text
                 );
             END LOOP;
         END LOOP;
@@ -185,22 +242,48 @@ BEGIN
 END $$;
 
 -- Create some specific test scenarios with known data
-INSERT INTO thread_update (webhook_name, thread_id, revision_number, content, timestamp, status) VALUES
+INSERT INTO thread_update (webhook_name, thread_id, revision_number, content, timestamp, status, traceback) VALUES
     -- Thread with all pending updates (ready to process)
-    ('test', 'test-pending-only', 1.0, '{"thread_id": "test-pending-only", "revision": 1.0, "data": "pending 1"}', extract(epoch from now() - interval '10 minutes'), 'pending'),
-    ('test', 'test-pending-only', 2.0, '{"thread_id": "test-pending-only", "revision": 2.0, "data": "pending 2"}', extract(epoch from now() - interval '8 minutes'), 'pending'),
-    ('test', 'test-pending-only', 3.0, '{"thread_id": "test-pending-only", "revision": 3.0, "data": "pending 3 (latest)"}', extract(epoch from now() - interval '5 minutes'), 'pending'),
+    ('test', 'test-pending-only', 1.0, '{"thread_id": "test-pending-only", "revision": 1.0, "data": "pending 1"}', extract(epoch from now() - interval '10 minutes'), 'pending', NULL),
+    ('test', 'test-pending-only', 2.0, '{"thread_id": "test-pending-only", "revision": 2.0, "data": "pending 2"}', extract(epoch from now() - interval '8 minutes'), 'pending', NULL),
+    ('test', 'test-pending-only', 3.0, '{"thread_id": "test-pending-only", "revision": 3.0, "data": "pending 3 (latest)"}', extract(epoch from now() - interval '5 minutes'), 'pending', NULL),
 
     -- Thread with out-of-order revisions
-    ('test', 'test-out-of-order', 5.0, '{"thread_id": "test-out-of-order", "revision": 5.0}', extract(epoch from now() - interval '15 minutes'), 'pending'),
-    ('test', 'test-out-of-order', 2.0, '{"thread_id": "test-out-of-order", "revision": 2.0}', extract(epoch from now() - interval '14 minutes'), 'pending'),
-    ('test', 'test-out-of-order', 8.0, '{"thread_id": "test-out-of-order", "revision": 8.0}', extract(epoch from now() - interval '13 minutes'), 'pending'),
-    ('test', 'test-out-of-order', 3.0, '{"thread_id": "test-out-of-order", "revision": 3.0}', extract(epoch from now() - interval '12 minutes'), 'pending'),
+    ('test', 'test-out-of-order', 5.0, '{"thread_id": "test-out-of-order", "revision": 5.0}', extract(epoch from now() - interval '15 minutes'), 'pending', NULL),
+    ('test', 'test-out-of-order', 2.0, '{"thread_id": "test-out-of-order", "revision": 2.0}', extract(epoch from now() - interval '14 minutes'), 'pending', NULL),
+    ('test', 'test-out-of-order', 8.0, '{"thread_id": "test-out-of-order", "revision": 8.0}', extract(epoch from now() - interval '13 minutes'), 'pending', NULL),
+    ('test', 'test-out-of-order', 3.0, '{"thread_id": "test-out-of-order", "revision": 3.0}', extract(epoch from now() - interval '12 minutes'), 'pending', NULL),
 
-    -- Thread with errors
-    ('test', 'test-with-errors', 1.0, '{"thread_id": "test-with-errors", "revision": 1.0}', extract(epoch from now() - interval '25 minutes'), 'error'),
-    ('test', 'test-with-errors', 2.0, '{"thread_id": "test-with-errors", "revision": 2.0}', extract(epoch from now() - interval '20 minutes'), 'error'),
-    ('test', 'test-with-errors', 3.0, '{"thread_id": "test-with-errors", "revision": 3.0}', extract(epoch from now() - interval '15 minutes'), 'pending');
+    -- Thread with errors (with detailed tracebacks)
+    ('test', 'test-with-errors', 1.0, '{"thread_id": "test-with-errors", "revision": 1.0}', extract(epoch from now() - interval '25 minutes'), 'error',
+'Traceback (most recent call last):
+  File "/app/basehook/pull.py", line 42, in process_update
+    result = await handler.process(update.content)
+  File "/app/handlers/test_handler.py", line 65, in process
+    await self.send_to_downstream(content)
+  File "/app/handlers/test_handler.py", line 112, in send_to_downstream
+    response = await self.http_client.post(self.webhook_url, json=data, timeout=10.0)
+  File "/usr/local/lib/python3.11/site-packages/httpx/_client.py", line 1842, in post
+    return await self.request("POST", url, **kwargs)
+httpx.ReadTimeout: timed out
+
+Downstream service did not respond within 10 seconds.'),
+
+    ('test', 'test-with-errors', 2.0, '{"thread_id": "test-with-errors", "revision": 2.0}', extract(epoch from now() - interval '20 minutes'), 'error',
+'Traceback (most recent call last):
+  File "/app/basehook/pull.py", line 42, in process_update
+    result = await handler.process(update.content)
+  File "/app/handlers/test_handler.py", line 58, in process
+    validated = self.schema.validate(content)
+  File "/app/handlers/test_handler.py", line 145, in validate
+    return TestSchema(**data)
+  File "/usr/local/lib/python3.11/site-packages/pydantic/main.py", line 341, in __init__
+    __pydantic_self__.__pydantic_validator__.validate_python(data, self_instance=__pydantic_self__)
+pydantic.ValidationError: 1 validation error for TestSchema
+revision
+  Field required [type=missing, input_value={''thread_id'': ''test-with-errors''}, input_type=dict]'),
+
+    ('test', 'test-with-errors', 3.0, '{"thread_id": "test-with-errors", "revision": 3.0}', extract(epoch from now() - interval '15 minutes'), 'pending', NULL);
 
 -- Add corresponding threads for test scenarios
 INSERT INTO thread (webhook_name, thread_id, last_revision_number) VALUES
@@ -249,3 +332,222 @@ SELECT
 FROM thread_update
 ORDER BY timestamp DESC
 LIMIT 10;
+
+
+-- Insert webhooks with different HMAC configurations
+
+  -- 1. Slack-style webhook with HMAC
+  INSERT INTO webhook (
+      name,
+      thread_id_path,
+      revision_number_path,
+      hmac_enabled,
+      hmac_secret,
+      hmac_header,
+      hmac_timestamp_header,
+      hmac_signature_format,
+      hmac_encoding,
+      hmac_algorithm,
+      hmac_prefix
+  ) VALUES (
+      'slack-events',
+      ARRAY['event', 'thread_ts'],
+      ARRAY['event_time'],
+      true,
+      'slack-signing-secret-key',
+      'X-Slack-Signature',
+      'X-Slack-Request-Timestamp',
+      'v0:{timestamp}:{body}',
+      'hex',
+      'sha256',
+      'v0='
+  );
+
+  -- 2. GitHub-style webhook with HMAC
+  INSERT INTO webhook (
+      name,
+      thread_id_path,
+      revision_number_path,
+      hmac_enabled,
+      hmac_secret,
+      hmac_header,
+      hmac_timestamp_header,
+      hmac_signature_format,
+      hmac_encoding,
+      hmac_algorithm,
+      hmac_prefix
+  ) VALUES (
+      'github-webhooks',
+      ARRAY['repository', 'full_name'],
+      ARRAY['head_commit', 'timestamp'],
+      true,
+      'github-webhook-secret',
+      'X-Hub-Signature-256',
+      NULL,
+      '{body}',
+      'hex',
+      'sha256',
+      'sha256='
+  );
+
+  -- 3. Shopify-style webhook with HMAC
+  INSERT INTO webhook (
+      name,
+      thread_id_path,
+      revision_number_path,
+      hmac_enabled,
+      hmac_secret,
+      hmac_header,
+      hmac_timestamp_header,
+      hmac_signature_format,
+      hmac_encoding,
+      hmac_algorithm,
+      hmac_prefix
+  ) VALUES (
+      'shopify-orders',
+      ARRAY['id'],
+      ARRAY['updated_at'],
+      true,
+      'shopify-shared-secret',
+      'X-Shopify-Hmac-SHA256',
+      NULL,
+      '{body}',
+      'base64',
+      'sha256',
+      NULL
+  );
+
+  -- 4. Stripe-style webhook with HMAC
+  INSERT INTO webhook (
+      name,
+      thread_id_path,
+      revision_number_path,
+      hmac_enabled,
+      hmac_secret,
+      hmac_header,
+      hmac_timestamp_header,
+      hmac_signature_format,
+      hmac_encoding,
+      hmac_algorithm,
+      hmac_prefix
+  ) VALUES (
+      'stripe-events',
+      ARRAY['data', 'object', 'id'],
+      ARRAY['created'],
+      true,
+      'stripe-webhook-secret',
+      'Stripe-Signature',
+      NULL,
+      '{timestamp}.{body}',
+      'hex',
+      'sha256',
+      NULL
+  );
+
+  -- 5. Simple webhook without HMAC
+  INSERT INTO webhook (
+      name,
+      thread_id_path,
+      revision_number_path,
+      hmac_enabled,
+      hmac_secret,
+      hmac_header,
+      hmac_timestamp_header,
+      hmac_signature_format,
+      hmac_encoding,
+      hmac_algorithm,
+      hmac_prefix
+  ) VALUES (
+      'internal-api',
+      ARRAY['request_id'],
+      ARRAY['timestamp'],
+      false,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      NULL
+  );
+
+  -- 6. Twilio-style webhook with HMAC (SHA1)
+  INSERT INTO webhook (
+      name,
+      thread_id_path,
+      revision_number_path,
+      hmac_enabled,
+      hmac_secret,
+      hmac_header,
+      hmac_timestamp_header,
+      hmac_signature_format,
+      hmac_encoding,
+      hmac_algorithm,
+      hmac_prefix
+  ) VALUES (
+      'twilio-sms',
+      ARRAY['MessageSid'],
+      ARRAY['DateSent'],
+      true,
+      'twilio-auth-token',
+      'X-Twilio-Signature',
+      NULL,
+      '{url}{body}',
+      'base64',
+      'sha1',
+      NULL
+  );
+
+  -- 7. Custom API webhook
+  INSERT INTO webhook (
+      name,
+      thread_id_path,
+      revision_number_path,
+      hmac_enabled,
+      hmac_secret,
+      hmac_header,
+      hmac_timestamp_header,
+      hmac_signature_format,
+      hmac_encoding,
+      hmac_algorithm,
+      hmac_prefix
+  ) VALUES (
+      'custom-api',
+      ARRAY['transaction', 'id'],
+      ARRAY['transaction', 'version'],
+      true,
+      'my-custom-secret',
+      'X-Custom-Signature',
+      NULL,
+      '{body}',
+      'hex',
+      'sha256',
+      NULL
+  );
+
+  -- 8. Zendesk-style webhook (no HMAC, relies on IP allowlisting)
+  INSERT INTO webhook (
+      name,
+      thread_id_path,
+      revision_number_path,
+      hmac_enabled,
+      hmac_secret,
+      hmac_header,
+      hmac_timestamp_header,
+      hmac_signature_format,
+      hmac_encoding,
+      hmac_algorithm,
+      hmac_prefix
+  ) VALUES (
+      'zendesk-tickets',
+      ARRAY['ticket', 'id'],
+      ARRAY['ticket', 'updated_at'],
+      false,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      NULL
+  );
