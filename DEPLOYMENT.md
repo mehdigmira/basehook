@@ -1,5 +1,54 @@
 # Basehook Deployment Guide
 
+## Deployment Options
+
+Basehook supports two deployment methods:
+1. **Docker Compose** - For self-hosting on your own servers
+2. **Railway** - For cloud hosting with managed infrastructure
+
+---
+
+## Docker Compose Deployment
+
+### Quick Start
+
+```bash
+git clone https://github.com/mehdigmira/basehook.git
+cd basehook
+docker-compose up -d
+```
+
+Your API is now running at `http://localhost:8000`!
+
+### Configuration
+
+Edit `docker-compose.yml` to customize:
+
+```yaml
+environment:
+  DATABASE_URL: postgresql+asyncpg://basehook:basehook@db:5432/basehook
+  # Add other environment variables here
+```
+
+### Production Recommendations
+
+1. **Use secrets for passwords:**
+   ```yaml
+   environment:
+     POSTGRES_PASSWORD: ${DB_PASSWORD}  # From .env file
+   ```
+
+2. **Add reverse proxy (nginx/traefik)** for HTTPS
+
+3. **Set up backups:**
+   ```bash
+   docker exec basehook-db pg_dump -U basehook > backup.sql
+   ```
+
+4. **Use volumes for persistence** (already configured)
+
+---
+
 ## Railway Deployment
 
 This project is configured for easy deployment on [Railway](https://railway.app).

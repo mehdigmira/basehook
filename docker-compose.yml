@@ -2,7 +2,9 @@ version: '3.8'
 
 services:
   db:
-    image: postgres:15
+    image: postgres:15-alpine
+    container_name: basehook-db
+    restart: unless-stopped
     environment:
       POSTGRES_USER: basehook
       POSTGRES_PASSWORD: basehook
@@ -14,9 +16,13 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - basehook-network
 
   app:
     build: .
+    container_name: basehook-app
+    restart: unless-stopped
     ports:
       - "8000:8000"
     environment:
@@ -25,6 +31,12 @@ services:
       db:
         condition: service_healthy
     command: uvicorn basehook.api:app --host 0.0.0.0 --port 8000
+    networks:
+      - basehook-network
 
 volumes:
   postgres_data:
+
+networks:
+  basehook-network:
+    driver: bridge

@@ -1,4 +1,3 @@
-import asyncio
 import time
 from contextlib import asynccontextmanager
 from typing import Any
@@ -25,7 +24,17 @@ basehook: Basehook | None = None
 async def lifespan(_app: FastAPI):
     global basehook
     basehook = Basehook()  # Create in event loop
-    await basehook.create_tables(metadata)
+
+    # Create tables - will fail if database is not available
+    # Railway will restart the app when DATABASE_URL is added
+    try:
+        await basehook.create_tables(metadata)
+        print("✓ Database tables created successfully")
+    except Exception as e:
+        print(f"✗ Database connection failed: {e}")
+        print("Waiting for DATABASE_URL to be configured...")
+        raise  # Let Railway restart the app
+
     yield
     # Optionally dispose
     await basehook.engine.dispose()

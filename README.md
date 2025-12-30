@@ -4,39 +4,57 @@ A modern webhook management system with thread-based updates and HMAC authentica
 
 ## Quick Deploy
 
-### One-Click Deploy Options
+### 🐳 Docker Compose (Recommended for Self-Hosting)
 
-#### 🟦 Render (True One-Click with Database)
+The easiest way to run Basehook with all dependencies:
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/mehdigmira/basehook)
+```bash
+# Clone the repository
+git clone https://github.com/mehdigmira/basehook.git
+cd basehook
 
-**Truly one-click!** Render reads `render.yaml` and automatically:
-- Creates PostgreSQL database
-- Deploys the application
-- Connects everything
-- No manual steps needed!
+# Start everything (app + PostgreSQL)
+docker-compose up -d
 
-#### 🟪 Railway (2 clicks)
+# View logs
+docker-compose logs -f
+
+# Stop everything
+docker-compose down
+```
+
+**What you get:**
+- ✅ FastAPI application running on port 8000
+- ✅ PostgreSQL database (automatically configured)
+- ✅ Database tables created automatically
+- ✅ Persistent data storage
+
+Access your API at: `http://localhost:8000`
+
+### ☁️ Railway (Cloud Hosting)
+
+Deploy to Railway in 2 steps:
 
 [![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template?template=https://github.com/mehdigmira/basehook)
 
-1. Click button → deploys app
-2. Click "New" → "Database" → "Add PostgreSQL"
+**Steps:**
 
-#### 🟩 Fly.io (CLI required)
+1. **Click the button above** → Railway starts deploying your app
+   - ⚠️ Initial deployment will fail (no database yet - this is expected!)
+   - You'll see: "Database connection failed: ..."
 
-```bash
-fly launch  # Creates app + Postgres automatically
-fly deploy  # Deploys your app
-```
+2. **Add database**: In Railway dashboard, click "New" → "Database" → "Add PostgreSQL"
+   - Railway detects the new `DATABASE_URL` environment variable
+   - Railway automatically triggers a new deployment
+   - ✅ App starts successfully with database connection!
 
-#### 🐳 Docker Compose (Self-hosted, one command)
+**Why this works:** Railway's restart policy automatically redeploys your app when environment variables change.
 
-```bash
-docker-compose up -d
-```
-
-Includes both app and PostgreSQL database!
+**Features:**
+- Free tier available
+- Automatic HTTPS
+- Environment variables auto-configured
+- Built-in monitoring and logs
 
 ## Project Structure
 

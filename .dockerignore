@@ -1,5 +1,8 @@
-# Development files
-.venv/
+# Git
+.git/
+.gitignore
+
+# Python
 __pycache__/
 *.pyc
 *.pyo
@@ -8,15 +11,15 @@ __pycache__/
 *.so
 *.egg
 *.egg-info/
-dist/
-build/
+.venv/
+venv/
+env/
 
 # Testing
 .pytest_cache/
 .coverage
 htmlcov/
 .tox/
-*.cover
 
 # IDE
 .vscode/
@@ -25,13 +28,17 @@ htmlcov/
 *.swo
 *~
 
-# Git
-.git/
-.gitignore
+# Documentation
+*.md
+DEPLOYMENT.md
+
+# CI/CD
+.github/
+
+# Railway
+railway.toml
+railway.json
+.railwayignore
 
 # Example files
 example_usage.py
-
-# Docker files (not needed in Railway)
-Dockerfile
-docker-compose.yml
