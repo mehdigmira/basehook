@@ -2,6 +2,8 @@
 
 A webhook management system that groups updates by thread ID and lets you consume them either one-by-one or buffered (latest revision only).
 
+[![Demo Video](https://img.youtube.com/vi/qddNp3lVBGI/0.jpg)](https://www.youtube.com/watch?v=qddNp3lVBGI)
+
 ## Core Concepts
 
 **Thread-based grouping**: Webhooks are grouped by thread ID. Configure JSON paths to extract thread IDs and revision numbers from any format (Slack, GitHub, Shopify, etc.).
