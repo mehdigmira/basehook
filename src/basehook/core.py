@@ -44,7 +44,90 @@ class Basehook:
             await conn.run_sync(metadata.create_all)
 
     @asynccontextmanager
-    async def last_revision(self, buffer_in_seconds: int = 0) -> AsyncGenerator[Any, None]:
+    async def pop(
+        self, webhook_name, *, buffer_in_seconds: int = 0, only_last_revision: bool = True
+    ) -> AsyncGenerator[Any, None]:
+        ctx_manager = self._last_revision if only_last_revision else self._revision
+        async with ctx_manager(webhook_name, buffer_in_seconds=buffer_in_seconds) as ctx:
+            yield ctx
+
+    @asynccontextmanager
+    async def _revision(
+        self, webhook_name: str, buffer_in_seconds: int = 0
+    ) -> AsyncGenerator[Any, None]:
+        async with self.engine.begin() as conn:
+            while True:
+                # pickup one update that is old enough to be processed
+                result = await conn.execute(
+                    select(
+                        thread_update_table.c.thread_id,
+                    )
+                    .where(
+                        thread_update_table.c.status == ThreadUpdateStatus.PENDING,
+                        thread_update_table.c.timestamp <= time.time() - buffer_in_seconds,
+                        thread_update_table.c.webhook_name == webhook_name,
+                    )
+                    .with_for_update(skip_locked=True)
+                    .limit(1)
+                )
+                first_update = result.first()
+                if not first_update:
+                    # no updates to process
+                    yield None
+                    return
+                thread_id = first_update.thread_id
+
+                # lock the thread to ensure it is not processed by another process
+                result = await conn.execute(
+                    select(thread_table)
+                    .where(
+                        thread_table.c.thread_id == thread_id,
+                        thread_table.c.webhook_name == webhook_name,
+                    )
+                    .with_for_update(skip_locked=True)
+                )
+                thread_row = result.first()
+                if not thread_row:
+                    # thread already locked by another process, try again
+                    continue
+
+                # get first update
+                result = await conn.execute(
+                    select(thread_update_table)
+                    .where(
+                        thread_update_table.c.webhook_name == webhook_name,
+                        thread_update_table.c.thread_id == thread_id,
+                        thread_update_table.c.status == ThreadUpdateStatus.PENDING,
+                    )
+                    .order_by(thread_update_table.c.revision_number.asc())
+                    .limit(1)
+                )
+                first_update = result.first()
+                if first_update is not None:
+                    # we have something to process, break
+                    break
+
+            status = ThreadUpdateStatus.SUCCESS
+            error_traceback = None
+            try:
+                yield first_update.content
+            except Exception:
+                # error processing the updates, mark the thread as error
+                status = ThreadUpdateStatus.ERROR
+                error_traceback = traceback.format_exc()
+                raise
+            finally:
+                await conn.execute(
+                    update(thread_update_table)
+                    .where(thread_update_table.c.id == first_update.id)
+                    .values(status=status, traceback=error_traceback)
+                )
+                await conn.commit()
+
+    @asynccontextmanager
+    async def _last_revision(
+        self, webhook_name: str, *, buffer_in_seconds: int = 0
+    ) -> AsyncGenerator[Any, None]:
         """
         Pull the last revision of a given thread from the database.
         Logic is:
@@ -68,24 +151,24 @@ class Basehook:
         async with self.engine.begin() as conn:
             while True:
                 # pickup one update that is old enough to be processed
-                result = await conn.execute(
-                    select(
-                        thread_update_table.c.thread_id,
-                        thread_update_table.c.webhook_name,
+                thread_id = (
+                    await conn.execute(
+                        select(
+                            thread_update_table.c.thread_id,
+                        )
+                        .where(
+                            thread_update_table.c.status == ThreadUpdateStatus.PENDING,
+                            thread_update_table.c.timestamp <= time.time() - buffer_in_seconds,
+                            thread_update_table.c.webhook_name == webhook_name,
+                        )
+                        .with_for_update(skip_locked=True)
+                        .limit(1)
                     )
-                    .where(
-                        thread_update_table.c.status == ThreadUpdateStatus.PENDING,
-                        thread_update_table.c.timestamp <= time.time() - buffer_in_seconds,
-                    )
-                    .with_for_update(skip_locked=True)
-                    .limit(1)
-                )
-                first_update = result.first()
-                if not first_update:
+                ).scalar_one_or_none()
+                if thread_id is None:
                     # no updates to process
                     yield None
                     return
-                thread_id, webhook_name = first_update
 
                 # lock the thread to ensure it is not processed by another process
                 result = await conn.execute(

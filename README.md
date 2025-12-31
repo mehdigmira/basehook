@@ -1,121 +1,65 @@
 # Basehook
 
-A modern webhook management system with thread-based updates and HMAC authentication.
+A webhook management system that handles thread-based updates with deduplication.
+
+## Core Concepts
+
+**Thread-based updates**: Group related webhook events by thread ID and track their revision numbers to ensure proper ordering and deduplication.
+
+**Flexible path extraction**: Configure JSON paths to extract thread IDs and revision numbers from any webhook format (Slack, GitHub, Shopify, etc.).
+
+**Pull-based processing**: Your application pulls pending updates via `pull()` rather than receiving direct webhook POSTs, enabling safe processing with automatic retry on failure.
 
 ## Quick Deploy
 
-### 🐳 Docker Compose (Recommended for Self-Hosting)
-
-The easiest way to run Basehook with all dependencies:
+### Docker Compose (Self-hosting)
 
 ```bash
-# Clone the repository
 git clone https://github.com/mehdigmira/basehook.git
 cd basehook
-
-# Start everything (app + PostgreSQL)
 docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# Stop everything
-docker-compose down
 ```
 
-**What you get:**
-- ✅ FastAPI application running on port 8000
-- ✅ PostgreSQL database (automatically configured)
-- ✅ Database tables created automatically
-- ✅ Persistent data storage
+Access at `http://localhost:8000`
 
-Access your API at: `http://localhost:8000`
+### Railway (Cloud)
 
-### ☁️ Railway (Cloud Hosting)
+1. Deploy to Railway
+2. Add PostgreSQL database in Railway UI
+3. Railway auto-restarts with `DATABASE_URL` configured
 
-Deploy to Railway in 2 steps:
-
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template?template=https://github.com/mehdigmira/basehook)
-
-**Steps:**
-
-1. **Click the button above** → Railway starts deploying your app
-   - ⚠️ Initial deployment will fail (no database yet - this is expected!)
-   - You'll see: "Database connection failed: ..."
-
-2. **Add database**: In Railway dashboard, click "New" → "Database" → "Add PostgreSQL"
-   - Railway detects the new `DATABASE_URL` environment variable
-   - Railway automatically triggers a new deployment
-   - ✅ App starts successfully with database connection!
-
-**Why this works:** Railway's restart policy automatically redeploys your app when environment variables change.
-
-**Features:**
-- Free tier available
-- Automatic HTTPS
-- Environment variables auto-configured
-- Built-in monitoring and logs
-
-## Project Structure
-
-```
-basehook/
-├── src/
-│   └── basehook/
-│       ├── __init__.py
-│       └── api.py
-├── tests/
-├── pyproject.toml
-├── .gitignore
-└── README.md
-```
-
-## Installation
-
-### Development Setup
+## Development Setup
 
 ```bash
-# Create a virtual environment
-python3.10 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
+uvicorn basehook.api:app --reload
+```
 
-# Install the package in editable mode with dev dependencies
-pip install -e ".[dev]"
+Frontend (optional):
+```bash
+cd frontend/app
+npm install
+npm run dev
 ```
 
 ## Usage
 
 ```python
-from basehook import app
+from basehook import Basehook
 
-# Use the API
-result = app.get("/example")
-response = app.post("/example", {"key": "value"})
+basehook = Basehook(database_url="postgresql+asyncpg://...")
+await basehook.create_tables(metadata)
+
+# Pull pending updates for a thread
+async for update in basehook.pull("webhook-name", "thread-123"):
+    process(update)  # Your processing logic
+    # Update marked as SUCCESS if no exception
+    # Update marked as ERROR if exception raised
 ```
 
-## Development
-
-### Running Tests
-
-```bash
-pytest
-```
-
-### Code Formatting
-
-```bash
-# Format code with black
-black src/ tests/
-
-# Lint with ruff
-ruff check src/ tests/
-```
-
-### Type Checking
-
-```bash
-mypy src/
-```
+Configure webhooks via the web UI at `/webhooks` or API at `/api/webhooks`.
 
 ## License
 

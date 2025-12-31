@@ -70,7 +70,7 @@ const WEBHOOK_PRESETS: Record<string, Partial<Webhook>> = {
     name: "",
     thread_id_path: ["event", "thread_ts"],
     revision_number_path: ["event_time"],
-    revision_number_fallback_path: ["event", "ts"],
+    thread_id_fallback_path: ["event", "ts"],
     hmac_enabled: true,
     hmac_header: "X-Slack-Signature",
     hmac_timestamp_header: "X-Slack-Request-Timestamp",

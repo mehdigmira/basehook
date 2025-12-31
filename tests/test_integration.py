@@ -106,13 +106,13 @@ async def test_basic_webhook_post_and_last_revision(
 ) -> None:
     """
     Test basic flow:
-    - Push to /test
+    - Push to /webhooks/test
     - Call last_revision
     - Ensure database is updated accordingly
     """
     # Push a webhook event
     response = await client.post(
-        "/test",
+        "/webhooks/test",
         json={"thread_id": "thread-1", "revision": 1.0, "data": "first update"},
     )
     assert response.status_code == 200
@@ -121,7 +121,7 @@ async def test_basic_webhook_post_and_last_revision(
     time.sleep(0.1)
 
     # Pull the last revision
-    async with basehook.last_revision(buffer_in_seconds=0) as update:
+    async with basehook.pop("test") as update:
         assert update is not None
         assert update["thread_id"] == "thread-1"
         assert update["revision"] == 1.0
@@ -141,14 +141,14 @@ async def test_basic_webhook_post_and_last_revision(
 async def test_old_revision_skipped(client: AsyncClient, basehook: Basehook) -> None:
     """
     Test old revision handling:
-    - Push to /test
+    - Push to /webhooks/test
     - Process it with last_revision
-    - Push to /test with old revision
+    - Push to /webhooks/test with old revision
     - Make sure last_revision returns None and database updated item as skipped
     """
     # Push first update with revision 2.0
     response = await client.post(
-        "/test",
+        "/webhooks/test",
         json={"thread_id": "thread-2", "revision": 2.0, "data": "newer update"},
     )
     assert response.status_code == 200
@@ -156,13 +156,13 @@ async def test_old_revision_skipped(client: AsyncClient, basehook: Basehook) -> 
     time.sleep(0.1)
 
     # Process it
-    async with basehook.last_revision(buffer_in_seconds=0) as update:
+    async with basehook.pop("test") as update:
         assert update is not None
         assert update["revision"] == 2.0
 
     # Now push an older revision
     response = await client.post(
-        "/test",
+        "/webhooks/test",
         json={"thread_id": "thread-2", "revision": 1.0, "data": "older update"},
     )
     assert response.status_code == 200
@@ -170,7 +170,7 @@ async def test_old_revision_skipped(client: AsyncClient, basehook: Basehook) -> 
     time.sleep(0.1)
 
     # Try to pull - should return None since only old revision is pending
-    async with basehook.last_revision(buffer_in_seconds=0) as update:
+    async with basehook.pop("test") as update:
         assert update is None
 
     # Check database - old revision should be skipped
@@ -186,14 +186,14 @@ async def test_old_revision_skipped(client: AsyncClient, basehook: Basehook) -> 
 async def test_multiple_items_random_order(client: AsyncClient, basehook: Basehook) -> None:
     """
     Test multiple updates in random order:
-    - Push multiple items to /test in random order
+    - Push multiple items to /webhooks/test in random order
     - Make sure last_revision returns last item and db is updated accordingly
     """
     # Push multiple updates in random order
     revisions = [3.0, 1.0, 5.0, 2.0, 4.0]
     for rev in revisions:
         response = await client.post(
-            "/test",
+            "/webhooks/test",
             json={"thread_id": "thread-3", "revision": rev, "data": f"update {rev}"},
         )
         assert response.status_code == 200
@@ -201,7 +201,7 @@ async def test_multiple_items_random_order(client: AsyncClient, basehook: Baseho
     time.sleep(0.1)
 
     # Pull the last revision - should get revision 5.0
-    async with basehook.last_revision(buffer_in_seconds=0) as update:
+    async with basehook.pop("test") as update:
         assert update is not None
         assert update["revision"] == 5.0
         assert update["data"] == "update 5.0"
@@ -229,13 +229,13 @@ async def test_multiple_items_random_order(client: AsyncClient, basehook: Baseho
 async def test_error_handling(client: AsyncClient, basehook: Basehook) -> None:
     """
     Test error handling:
-    - Push to /test
+    - Push to /webhooks/test
     - Call last_revision but raise an error during processing
     - Make sure update is marked as ERROR
     """
     # Push an update
     response = await client.post(
-        "/test",
+        "/webhooks/test",
         json={"thread_id": "thread-4", "revision": 1.0, "data": "will fail"},
     )
     assert response.status_code == 200
@@ -244,7 +244,7 @@ async def test_error_handling(client: AsyncClient, basehook: Basehook) -> None:
 
     # Try to process but raise an error - exception will be caught by context manager
     with pytest.raises(ValueError):
-        async with basehook.last_revision(buffer_in_seconds=0) as update:
+        async with basehook.pop("test") as update:
             assert update is not None
             # Simulate processing error
             raise ValueError("Processing failed")
@@ -258,3 +258,47 @@ async def test_error_handling(client: AsyncClient, basehook: Basehook) -> None:
     thread = await get_thread(basehook, "test", "thread-4")
     assert thread is not None
     assert thread.last_revision_number is None
+
+
+@pytest.mark.asyncio
+async def test_pop_first_revision(client: AsyncClient, basehook: Basehook) -> None:
+    """
+    Test pop with last_revision=False to get first (oldest) revision:
+    - Push multiple updates in random order
+    - Call pop with last_revision=False
+    - Should get the lowest revision number (not highest)
+    """
+    # Push multiple updates in random order
+    revisions = [3.0, 1.0, 5.0, 2.0, 4.0]
+    for rev in revisions:
+        response = await client.post(
+            "/webhooks/test",
+            json={"thread_id": "thread-5", "revision": rev, "data": f"update {rev}"},
+        )
+        assert response.status_code == 200
+
+    time.sleep(0.1)
+
+    # Pull the FIRST revision - should get revision 1.0
+    async with basehook.pop("test", last_revision=False) as update:
+        assert update is not None
+        assert update["revision"] == 1.0
+        assert update["data"] == "update 1.0"
+
+    # Check database state
+    updates = await get_thread_updates(basehook, "test", "thread-5")
+    assert len(updates) == 5
+
+    # The lowest revision should be SUCCESS
+    lowest = next(u for u in updates if u.revision_number == 1.0)
+    assert lowest.status == ThreadUpdateStatus.SUCCESS
+
+    # All others should be SKIPPED (since we processed the first one)
+    for u in updates:
+        if u.revision_number > 1.0:
+            assert u.status == ThreadUpdateStatus.SKIPPED
+
+    # Thread should have last_revision_number = 1.0
+    thread = await get_thread(basehook, "test", "thread-5")
+    assert thread is not None
+    assert thread.last_revision_number == 1.0
