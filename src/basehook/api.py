@@ -1,3 +1,4 @@
+import json
 import os
 import time
 from contextlib import asynccontextmanager
@@ -5,6 +6,7 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import String, func, select, update as sql_update
 from sqlalchemy.dialects.postgresql import insert
@@ -655,10 +657,12 @@ async def read_root(webhook_name: str, request: Request):
                 await conn.commit()
                 raise HTTPException(status_code=500, detail=error_msg) from e
 
-        # Parse JSON content from body
-        import json
-
         content = json.loads(body)
+
+        # Handle challenge-response for Slack/Discord webhook verification
+        challenge = content.get("challenge")
+        if challenge:
+            return {"challenge": challenge}
 
         thread_id_value = _get_from_json(content, webhook_row.thread_id_path) or str(uuid4())
         if not isinstance(thread_id_value, str):
@@ -687,7 +691,21 @@ async def read_root(webhook_name: str, request: Request):
         return {"message": "Thread created"}
 
 
-# Mount static files for frontend (must be last to not catch API routes)
+# Serve index.html for all non-API routes (SPA routing support)
 static_path = os.path.join(os.path.dirname(__file__), "static")
 if os.path.exists(static_path):
-    app.mount("/", StaticFiles(directory=static_path, html=True), name="static")
+    # Serve static assets
+    app.mount("/assets", StaticFiles(directory=os.path.join(static_path, "assets")), name="assets")
+
+    # Catch-all route for SPA - serves index.html for any non-API path
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        # Don't catch API routes or webhook routes
+        if full_path.startswith("api/") or full_path.startswith("webhooks/"):
+            raise HTTPException(status_code=404, detail="Not found")
+
+        # Serve index.html for all other routes (SPA routing)
+        index_path = os.path.join(static_path, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        raise HTTPException(status_code=404, detail="Not found")
