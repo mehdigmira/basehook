@@ -42,19 +42,26 @@ pip install basehook
 
 ### 3. Consume updates
 ```python
+import asyncio
 from basehook import Basehook
 
 basehook = Basehook(database_url="postgresql+asyncpg://...")
+webhook_name = ...
 
-# Process updates one by one (in order)
-async with basehook.pop("webhook-name", only_last_revision=False) as update:
-    if update:
-        process(update)
+async def process_one():
+    # Process updates one by one (in order)
+    async with basehook.pop(webhook_name, only_last_revision=False) as update:
+        if update:
+            print(update)
 
-# Or buffer updates and only process latest revision
-async with basehook.pop("webhook-name", only_last_revision=True) as update:
-    if update:
-        process(update)  # Older revisions automatically skipped
+async def process_last():
+    # Process last
+    async with basehook.pop(webhook_name, only_last_revision=True) as update:
+        if update:
+            print(update)
+
+if __name__ == "__main__":
+    asyncio.run(process_one())
 ```
 
 ## License
