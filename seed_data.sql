@@ -7,6 +7,85 @@
 -- TRUNCATE TABLE webhook CASCADE;
 
 
+  -- 8. Zendesk-style webhook (no HMAC, relies on IP allowlisting)
+  INSERT INTO webhook (
+      name,
+      thread_id_path,
+      revision_number_path,
+      hmac_enabled,
+      hmac_secret,
+      hmac_header,
+      hmac_timestamp_header,
+      hmac_signature_format,
+      hmac_encoding,
+      hmac_algorithm,
+      hmac_prefix
+  ) VALUES (
+      'zendesk-tickets',
+      ARRAY['ticket', 'id'],
+      ARRAY['ticket', 'updated_at'],
+      false,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      NULL
+  );
+
+  update thread_update set content='{
+  "token": "YzPLud7HqlqYwfBXSiZoXDpZ",
+  "team_id": "T0823S1DGGM",
+  "context_team_id": "T0823S1DGGM",
+  "context_enterprise_id": null,
+  "api_app_id": "A0A2W6VMUJX",
+  "event": {
+    "type": "message",
+    "user": "U082KCBQZ09",
+    "ts": "1767194158.923389",
+    "client_msg_id": "dd560098-9a07-4541-ac02-0756190cf786",
+    "text": "test",
+    "team": "T0823S1DGGM",
+    "thread_ts": "1767194091.516949",
+    "parent_user_id": "U082KCBQZ09",
+    "blocks": [
+      {
+        "type": "rich_text",
+        "block_id": "gB9fq",
+        "elements": [
+          {
+            "type": "rich_text_section",
+            "elements": [
+              {
+                "type": "text",
+                "text": "test"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "channel": "C092ZMD8QHZ",
+    "event_ts": "1767194158.923389",
+    "channel_type": "channel"
+  },
+  "type": "event_callback",
+  "event_id": "Ev0A67D2JBN2",
+  "event_time": 1767194158,
+  "authorizations": [
+    {
+      "enterprise_id": null,
+      "team_id": "T0823S1DGGM",
+      "user_id": "U0A3WUHHKNU",
+      "is_bot": true,
+      "is_enterprise_install": false
+    }
+  ],
+  "is_ext_shared_channel": false,
+  "event_context": "4-eyJldCI6Im1lc3NhZ2UiLCJ0aWQiOiJUMDgyM1MxREdHTSIsImFpZCI6IkEwQTJXNlZNVUpYIiwiY2lkIjoiQzA5MlpNRDhRSFoifQ"
+}'::jsonb
+
 -- Generate threads (500 threads across all webhooks)
 DO $$
 DECLARE
@@ -522,32 +601,5 @@ LIMIT 10;
       '{body}',
       'hex',
       'sha256',
-      NULL
-  );
-
-  -- 8. Zendesk-style webhook (no HMAC, relies on IP allowlisting)
-  INSERT INTO webhook (
-      name,
-      thread_id_path,
-      revision_number_path,
-      hmac_enabled,
-      hmac_secret,
-      hmac_header,
-      hmac_timestamp_header,
-      hmac_signature_format,
-      hmac_encoding,
-      hmac_algorithm,
-      hmac_prefix
-  ) VALUES (
-      'zendesk-tickets',
-      ARRAY['ticket', 'id'],
-      ARRAY['ticket', 'updated_at'],
-      false,
-      NULL,
-      NULL,
-      NULL,
-      NULL,
-      NULL,
-      NULL,
       NULL
   );

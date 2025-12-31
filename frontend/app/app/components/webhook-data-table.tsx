@@ -22,6 +22,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "~/components/ui/dialog"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "~/components/ui/sheet"
 import { useDataTable } from "~/hooks/use-data-table"
 import { TooltipContent, Tooltip, TooltipTrigger } from "./ui/tooltip"
 
@@ -107,6 +114,10 @@ export function WebhookDataTable({
   const [tracebackDialog, setTracebackDialog] = React.useState<{ open: boolean; traceback: string | null }>({
     open: false,
     traceback: null,
+  })
+  const [contentDialog, setContentDialog] = React.useState<{ open: boolean; content: any }>({
+    open: false,
+    content: null,
   })
 
   const handleBulkAction = (action: "reenqueue" | "skip", isAll: boolean, selectedIds: number[]) => {
@@ -264,12 +275,17 @@ export function WebhookDataTable({
         header: "Content",
         cell: ({ cell }) => {
           const content = cell.getValue<ThreadUpdate["content"]>()
+          const preview = JSON.stringify(content).slice(0, 50)
           return (
-            <div className="max-w-xs">
-              <pre className="text-xs overflow-x-auto">
-                {JSON.stringify(content, null, 2)}
-              </pre>
-            </div>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                setContentDialog({ open: true, content })
+              }}
+              className="text-xs font-mono text-left hover:text-primary cursor-pointer"
+            >
+              {preview}...
+            </button>
           )
         },
         enableSorting: false,
@@ -364,6 +380,22 @@ export function WebhookDataTable({
           </div>
         </DialogContent>
       </Dialog>
+
+      <Sheet open={contentDialog.open} onOpenChange={(open) => setContentDialog({ open, content: null })}>
+        <SheetContent className="sm:max-w-2xl overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>Webhook Payload</SheetTitle>
+            <SheetDescription>
+              Full JSON content of the webhook request
+            </SheetDescription>
+          </SheetHeader>
+          <div className="m-4">
+            <pre className="text-xs bg-muted p-4 rounded-lg whitespace-pre-wrap break-words">
+              {JSON.stringify(contentDialog.content, null, 2)}
+            </pre>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }

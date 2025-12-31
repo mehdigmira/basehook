@@ -8,7 +8,8 @@ from uuid import uuid4
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import String, func, select, update as sql_update
+from sqlalchemy import String, func, select
+from sqlalchemy import update as sql_update
 from sqlalchemy.dialects.postgresql import insert
 
 from basehook.core import Basehook
@@ -100,18 +101,45 @@ def _get_from_json(json: Any, path: list[str]) -> Any:
 
 
 def _get_revision_number(json: Any, path: list[str]) -> float:
+    from datetime import datetime
+
     revision_number = _get_from_json(json, path)
-    if revision_number is None or (
-        not isinstance(revision_number, float) and not isinstance(revision_number, str)
-    ):
+    if revision_number is None:
         return time.time()
 
-    try:
-        revision_number = float(revision_number)
-    except ValueError:
-        return time.time()
-    else:
-        return revision_number
+    # If already a number, try to convert to float
+    if isinstance(revision_number, (int, float)):
+        return float(revision_number)
+
+    # If string, try parsing as number, datetime, or date
+    if isinstance(revision_number, str):
+        # Try parsing as float
+        try:
+            return float(revision_number)
+        except ValueError:
+            pass
+
+        # Try parsing as ISO datetime
+        try:
+            dt = datetime.fromisoformat(revision_number.replace("Z", "+00:00"))
+            return dt.timestamp()
+        except (ValueError, AttributeError):
+            pass
+
+        # Try parsing common datetime formats
+        for fmt in [
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d",
+        ]:
+            try:
+                dt = datetime.strptime(revision_number, fmt)
+                return dt.timestamp()
+            except ValueError:
+                continue
+
+    # Fallback to current time
+    return time.time()
 
 
 @app.post("/api/query")
@@ -260,8 +288,8 @@ async def update_status(request: Request):
     # Validate status
     try:
         status_enum = ThreadUpdateStatus[new_status.upper()]
-    except KeyError:
-        raise HTTPException(status_code=400, detail=f"Invalid status: {new_status}")
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid status: {new_status}") from e
 
     async with basehook.engine.begin() as conn:
         # Build update statement
@@ -352,7 +380,12 @@ async def get_metrics(range: str = "24h"):
         rows = result.all()
 
         # Build cumulative counts
-        cumulative = {ThreadUpdateStatus.PENDING: 0, ThreadUpdateStatus.SUCCESS: 0, ThreadUpdateStatus.ERROR: 0, ThreadUpdateStatus.SKIPPED: 0}
+        cumulative = {
+            ThreadUpdateStatus.PENDING: 0,
+            ThreadUpdateStatus.SUCCESS: 0,
+            ThreadUpdateStatus.ERROR: 0,
+            ThreadUpdateStatus.SKIPPED: 0,
+        }
         data_points = []
         current_window = None
 
@@ -363,27 +396,31 @@ async def get_metrics(range: str = "24h"):
 
             # If we hit a new window, push a data point with current cumulative totals
             if current_window is not None and row.window_timestamp != current_window:
-                data_points.append({
+                data_points.append(
+                    {
+                        "timestamp": current_window,
+                        "date": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(current_window)),
+                        "pending": cumulative[ThreadUpdateStatus.PENDING],
+                        "success": cumulative[ThreadUpdateStatus.SUCCESS],
+                        "error": cumulative[ThreadUpdateStatus.ERROR],
+                        "skipped": cumulative[ThreadUpdateStatus.SKIPPED],
+                    }
+                )
+
+            current_window = row.window_timestamp
+
+        # Don't forget the last window
+        if current_window is not None:
+            data_points.append(
+                {
                     "timestamp": current_window,
                     "date": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(current_window)),
                     "pending": cumulative[ThreadUpdateStatus.PENDING],
                     "success": cumulative[ThreadUpdateStatus.SUCCESS],
                     "error": cumulative[ThreadUpdateStatus.ERROR],
                     "skipped": cumulative[ThreadUpdateStatus.SKIPPED],
-                })
-
-            current_window = row.window_timestamp
-
-        # Don't forget the last window
-        if current_window is not None:
-            data_points.append({
-                "timestamp": current_window,
-                "date": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(current_window)),
-                "pending": cumulative[ThreadUpdateStatus.PENDING],
-                "success": cumulative[ThreadUpdateStatus.SUCCESS],
-                "error": cumulative[ThreadUpdateStatus.ERROR],
-                "skipped": cumulative[ThreadUpdateStatus.SKIPPED],
-            })
+                }
+            )
 
         return {"data": data_points}
 
@@ -417,7 +454,9 @@ async def list_webhooks():
                 {
                     "name": w.name,
                     "thread_id_path": w.thread_id_path,
+                    "thread_id_fallback_path": w.thread_id_fallback_path,
                     "revision_number_path": w.revision_number_path,
+                    "revision_number_fallback_path": w.revision_number_fallback_path,
                     "hmac_enabled": w.hmac_enabled,
                     "hmac_secret": w.hmac_secret,
                     "hmac_header": w.hmac_header,
@@ -468,9 +507,7 @@ async def create_webhook(request: Request):
     if not body.get("thread_id_path"):
         raise HTTPException(status_code=400, detail="thread_id_path is required")
     if not body.get("revision_number_path"):
-        raise HTTPException(
-            status_code=400, detail="revision_number_path is required"
-        )
+        raise HTTPException(status_code=400, detail="revision_number_path is required")
 
     async with basehook.engine.begin() as conn:
         # Check if webhook already exists
@@ -479,16 +516,16 @@ async def create_webhook(request: Request):
         )
         existing = result.first()
         if existing:
-            raise HTTPException(
-                status_code=409, detail=f"Webhook '{body['name']}' already exists"
-            )
+            raise HTTPException(status_code=409, detail=f"Webhook '{body['name']}' already exists")
 
         # Insert new webhook
         await conn.execute(
             insert(webhook_table).values(
                 name=body["name"],
                 thread_id_path=body["thread_id_path"],
+                thread_id_fallback_path=body.get("thread_id_fallback_path"),
                 revision_number_path=body["revision_number_path"],
+                revision_number_fallback_path=body.get("revision_number_fallback_path"),
                 hmac_enabled=body.get("hmac_enabled", False),
                 hmac_secret=body.get("hmac_secret"),
                 hmac_header=body.get("hmac_header"),
@@ -509,7 +546,9 @@ async def create_webhook(request: Request):
         return {
             "name": webhook.name,
             "thread_id_path": webhook.thread_id_path,
+            "thread_id_fallback_path": webhook.thread_id_fallback_path,
             "revision_number_path": webhook.revision_number_path,
+            "revision_number_fallback_path": webhook.revision_number_fallback_path,
             "hmac_enabled": webhook.hmac_enabled,
             "hmac_secret": webhook.hmac_secret,
             "hmac_header": webhook.hmac_header,
@@ -552,22 +591,12 @@ async def update_webhook(webhook_name: str, request: Request):
         )
         existing = result.first()
         if not existing:
-            raise HTTPException(
-                status_code=404, detail=f"Webhook '{webhook_name}' not found"
-            )
-
-
-
-
+            raise HTTPException(status_code=404, detail=f"Webhook '{webhook_name}' not found")
 
         # Update webhook
         await conn.execute(
-            sql_update(webhook_table)
-            .where(webhook_table.c.name == webhook_name)
-            .values(**body)
+            sql_update(webhook_table).where(webhook_table.c.name == webhook_name).values(**body)
         )
-
-
 
 
 @app.post("/webhooks/{webhook_name}")
@@ -664,10 +693,28 @@ async def read_root(webhook_name: str, request: Request):
         if challenge:
             return {"challenge": challenge}
 
-        thread_id_value = _get_from_json(content, webhook_row.thread_id_path) or str(uuid4())
+        # Try primary path, then fallback, then UUID
+        thread_id_value = (
+            _get_from_json(content, webhook_row.thread_id_path)
+            or (
+                webhook_row.thread_id_fallback_path
+                and _get_from_json(content, webhook_row.thread_id_fallback_path)
+            )
+            or str(uuid4())
+        )
         if not isinstance(thread_id_value, str):
             thread_id_value = str(uuid4())
-        revision_number = _get_revision_number(content, webhook_row.revision_number_path)
+
+        # Try primary path, then fallback, then timestamp
+        revision_number = _get_from_json(content, webhook_row.revision_number_path) or (
+            webhook_row.revision_number_fallback_path
+            and _get_from_json(content, webhook_row.revision_number_fallback_path)
+        )
+        revision_number = (
+            _get_revision_number(content, webhook_row.revision_number_path)
+            if revision_number is None
+            else float(revision_number)
+        )
 
         await conn.execute(
             insert(thread_update_table).values(

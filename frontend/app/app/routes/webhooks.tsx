@@ -50,7 +50,9 @@ export function meta({}: Route.MetaArgs) {
 interface Webhook {
   name: string
   thread_id_path: string[]
+  thread_id_fallback_path?: string[] | null
   revision_number_path: string[]
+  revision_number_fallback_path?: string[] | null
   hmac_enabled: boolean
   hmac_secret?: string
   hmac_header?: string
@@ -68,6 +70,7 @@ const WEBHOOK_PRESETS: Record<string, Partial<Webhook>> = {
     name: "",
     thread_id_path: ["event", "thread_ts"],
     revision_number_path: ["event_time"],
+    revision_number_fallback_path: ["event", "ts"],
     hmac_enabled: true,
     hmac_header: "X-Slack-Signature",
     hmac_timestamp_header: "X-Slack-Request-Timestamp",
@@ -181,7 +184,9 @@ export default function Webhooks() {
           body: JSON.stringify({
             name: selectedWebhook.name,
             thread_id_path: selectedWebhook.thread_id_path,
+            thread_id_fallback_path: selectedWebhook.thread_id_fallback_path,
             revision_number_path: selectedWebhook.revision_number_path,
+            revision_number_fallback_path: selectedWebhook.revision_number_fallback_path,
             hmac_enabled: selectedWebhook.hmac_enabled,
             hmac_secret: selectedWebhook.hmac_secret,
             hmac_header: selectedWebhook.hmac_header,
@@ -205,7 +210,9 @@ export default function Webhooks() {
           body: JSON.stringify({
             name: selectedWebhook.name, // Allow renaming
             thread_id_path: selectedWebhook.thread_id_path,
+            thread_id_fallback_path: selectedWebhook.thread_id_fallback_path,
             revision_number_path: selectedWebhook.revision_number_path,
+            revision_number_fallback_path: selectedWebhook.revision_number_fallback_path,
             hmac_enabled: selectedWebhook.hmac_enabled,
             hmac_secret: selectedWebhook.hmac_secret,
             hmac_header: selectedWebhook.hmac_header,
@@ -483,6 +490,24 @@ export default function Webhooks() {
                   </div>
 
                   <div className="space-y-2">
+                    <Label htmlFor="thread-id-fallback-path">Thread ID Fallback Path (Optional)</Label>
+                    <Input
+                      id="thread-id-fallback-path"
+                      value={selectedWebhook.thread_id_fallback_path?.join(".") || ""}
+                      onChange={(e) =>
+                        setSelectedWebhook({
+                          ...selectedWebhook,
+                          thread_id_fallback_path: e.target.value ? e.target.value.split(".").filter(Boolean) : null
+                        })
+                      }
+                      placeholder="e.g., message.thread_ts"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Fallback path if primary path fails
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
                     <Label htmlFor="revision-path">Revision Number Path</Label>
                     <Input
                       id="revision-path"
@@ -497,6 +522,24 @@ export default function Webhooks() {
                     />
                     <p className="text-xs text-muted-foreground">
                       Dot-separated path to extract revision number from JSON payload
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="revision-fallback-path">Revision Number Fallback Path (Optional)</Label>
+                    <Input
+                      id="revision-fallback-path"
+                      value={selectedWebhook.revision_number_fallback_path?.join(".") || ""}
+                      onChange={(e) =>
+                        setSelectedWebhook({
+                          ...selectedWebhook,
+                          revision_number_fallback_path: e.target.value ? e.target.value.split(".").filter(Boolean) : null
+                        })
+                      }
+                      placeholder="e.g., ts"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Fallback path if primary path fails
                     </p>
                   </div>
                 </div>

@@ -43,9 +43,7 @@ def verify_hmac_signature(
 
     # HMAC the base string
     hash_func = hashlib.sha1 if algorithm == "sha1" else hashlib.sha256
-    raw_signature = hmac.new(
-        secret.encode("utf-8"), base_string.encode("utf-8"), hash_func
-    )
+    raw_signature = hmac.new(secret.encode("utf-8"), base_string.encode("utf-8"), hash_func)
 
     # Encode the signature
     if encoding == "hex":
