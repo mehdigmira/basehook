@@ -263,10 +263,11 @@ async def test_error_handling(client: AsyncClient, basehook: Basehook) -> None:
 @pytest.mark.asyncio
 async def test_pop_first_revision(client: AsyncClient, basehook: Basehook) -> None:
     """
-    Test pop with last_revision=False to get first (oldest) revision:
+    Test pop with only_last_revision=False to get first (oldest) revision:
     - Push multiple updates in random order
-    - Call pop with last_revision=False
+    - Call pop with only_last_revision=False
     - Should get the lowest revision number (not highest)
+    - Other revisions should remain PENDING (not skipped)
     """
     # Push multiple updates in random order
     revisions = [3.0, 1.0, 5.0, 2.0, 4.0]
@@ -280,7 +281,7 @@ async def test_pop_first_revision(client: AsyncClient, basehook: Basehook) -> No
     time.sleep(0.1)
 
     # Pull the FIRST revision - should get revision 1.0
-    async with basehook.pop("test", last_revision=False) as update:
+    async with basehook.pop("test", only_last_revision=False) as update:
         assert update is not None
         assert update["revision"] == 1.0
         assert update["data"] == "update 1.0"
@@ -293,12 +294,12 @@ async def test_pop_first_revision(client: AsyncClient, basehook: Basehook) -> No
     lowest = next(u for u in updates if u.revision_number == 1.0)
     assert lowest.status == ThreadUpdateStatus.SUCCESS
 
-    # All others should be SKIPPED (since we processed the first one)
+    # All others should still be PENDING (only_last_revision=False doesn't skip others)
     for u in updates:
         if u.revision_number > 1.0:
-            assert u.status == ThreadUpdateStatus.SKIPPED
+            assert u.status == ThreadUpdateStatus.PENDING
 
-    # Thread should have last_revision_number = 1.0
+    # Thread last_revision_number should still be None (not tracked when only_last_revision=False)
     thread = await get_thread(basehook, "test", "thread-5")
     assert thread is not None
-    assert thread.last_revision_number == 1.0
+    assert thread.last_revision_number is None
