@@ -1,0 +1,15 @@
+{
+    "$schema": "https://schema.railpack.com",
+    "steps": {
+        "new-step": {
+            "inputs": [
+                {
+                    "step": "build"
+                }
+            ],
+            "commands": [
+                "pip install -e ."
+            ]
+        }
+    }
+}
