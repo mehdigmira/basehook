@@ -5,9 +5,6 @@
 #    pip-compile
 #
 
-# Install the local package in editable mode
--e .
-
 annotated-doc==0.0.4
     # via fastapi
 annotated-types==0.7.0
