@@ -679,10 +679,3 @@ async def read_root(webhook_name: str, request: Request):
         )
 
         return {"message": "Thread created"}
-
-
-if __name__ == "__main__":
-
-    import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=8000)
