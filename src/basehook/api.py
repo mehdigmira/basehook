@@ -568,7 +568,7 @@ async def update_webhook(webhook_name: str, request: Request):
 
 
 
-@app.post("/{webhook_name}")
+@app.post("/webhooks/{webhook_name}")
 async def read_root(webhook_name: str, request: Request):
     async with basehook.engine.begin() as conn:
         result = await conn.execute(
@@ -591,6 +591,7 @@ async def read_root(webhook_name: str, request: Request):
                         .where(webhook_table.c.name == webhook_name)
                         .values(last_error=error_msg, last_error_timestamp=time.time())
                     )
+                    await conn.commit()
                     raise HTTPException(status_code=500, detail=error_msg)
 
                 # Get signature from header
@@ -603,6 +604,7 @@ async def read_root(webhook_name: str, request: Request):
                         .where(webhook_table.c.name == webhook_name)
                         .values(last_error=error_msg, last_error_timestamp=time.time())
                     )
+                    await conn.commit()
                     raise HTTPException(status_code=401, detail=error_msg)
 
                 # Get timestamp from header if configured
@@ -630,6 +632,7 @@ async def read_root(webhook_name: str, request: Request):
                         .where(webhook_table.c.name == webhook_name)
                         .values(last_error=error_msg, last_error_timestamp=time.time())
                     )
+                    await conn.commit()
                     raise HTTPException(status_code=401, detail=error_msg)
 
                 # Clear error on successful validation
@@ -649,6 +652,7 @@ async def read_root(webhook_name: str, request: Request):
                     .where(webhook_table.c.name == webhook_name)
                     .values(last_error=error_msg, last_error_timestamp=time.time())
                 )
+                await conn.commit()
                 raise HTTPException(status_code=500, detail=error_msg) from e
 
         # Parse JSON content from body

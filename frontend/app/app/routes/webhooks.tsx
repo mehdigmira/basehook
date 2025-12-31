@@ -308,7 +308,7 @@ export default function Webhooks() {
                 <div className="flex items-start justify-between">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
-                      <h3 className="font-semibold">/{webhook.name}</h3>
+                      <h3 className="font-semibold">/webhooks/{webhook.name}</h3>
                       {webhook.last_error && (
                         <AlertCircle className="h-4 w-4 text-destructive" />
                       )}
@@ -452,7 +452,7 @@ export default function Webhooks() {
                   <div className="space-y-2">
                     <Label htmlFor="webhook-name">Webhook path</Label>
                     <div className="flex items-center gap-2">
-                      <span className="text-muted-foreground">/</span>
+                      <span className="text-muted-foreground">/webhooks/</span>
                       <Input
                         id="webhook-name"
                         value={selectedWebhook.name || ""}
