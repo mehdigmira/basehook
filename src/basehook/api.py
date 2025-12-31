@@ -1,9 +1,11 @@
+import os
 import time
 from contextlib import asynccontextmanager
 from typing import Any
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import String, func, select, update as sql_update
 from sqlalchemy.dialects.postgresql import insert
 
@@ -679,3 +681,9 @@ async def read_root(webhook_name: str, request: Request):
         )
 
         return {"message": "Thread created"}
+
+
+# Mount static files for frontend (must be last to not catch API routes)
+static_path = os.path.join(os.path.dirname(__file__), "static")
+if os.path.exists(static_path):
+    app.mount("/", StaticFiles(directory=static_path, html=True), name="static")

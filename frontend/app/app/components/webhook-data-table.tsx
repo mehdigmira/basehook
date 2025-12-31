@@ -41,6 +41,7 @@ interface WebhookDataTableProps {
   pageCount?: number,
   rowCount?: number,
   onBulkAction?: (action: "reenqueue" | "skip", isAllSelected: boolean, selectedIds: number[]) => void
+  onThreadIdClick?: (threadId: string) => void
 }
 
 
@@ -100,6 +101,7 @@ export function WebhookDataTable({
   pageCount = -1,
   rowCount = 0,
   onBulkAction,
+  onThreadIdClick,
 }: WebhookDataTableProps) {
   const [isAllSelected, setIsAllSelected] = React.useState(false)
   const [tracebackDialog, setTracebackDialog] = React.useState<{ open: boolean; traceback: string | null }>({
@@ -169,11 +171,17 @@ export function WebhookDataTable({
         header: ({ column }: { column: Column<ThreadUpdate, unknown> }) => (
           <DataTableColumnHeader column={column} label="Thread ID" />
         ),
-        cell: ({ cell }) => (
-          <div className="font-mono text-xs">
-            {cell.getValue<ThreadUpdate["thread_id"]>()}
-          </div>
-        ),
+        cell: ({ cell }) => {
+          const threadId = cell.getValue<ThreadUpdate["thread_id"]>()
+          return (
+            <button
+              onClick={() => onThreadIdClick?.(threadId)}
+              className="font-mono text-xs underline decoration-dotted hover:text-primary cursor-pointer"
+            >
+              {threadId}
+            </button>
+          )
+        },
         meta: {
           label: "Thread ID",
           placeholder: "Search thread ID...",

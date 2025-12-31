@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import type { Route } from "./+types/home"
-import { useQueryState, parseAsInteger, parseAsString } from "nuqs"
+import { useQueryState, parseAsInteger, parseAsString, parseAsJson } from "nuqs"
 import { WebhookDataTable, type ThreadUpdate } from "~/components/webhook-data-table"
 import { RefreshCw } from "lucide-react"
 import { Button } from "~/components/ui/button"
@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/components/ui/select"
+import { generateId } from "~/lib/id"
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -28,8 +29,8 @@ export default function Home() {
 
   // Each useQueryState automatically triggers re-render when URL changes
   const [page] = useQueryState("page", parseAsInteger.withDefault(1))
-  const [filters, setFilters] = useQueryState("filters", parseAsString)
-  const [sort] = useQueryState("sort", parseAsString)
+  const [filters, setFilters] = useQueryState("filters", parseAsJson<any[]>((v) => Array.isArray(v) ? v : []).withDefault([]))
+  const [sort] = useQueryState("sort", parseAsJson<any[]>((v) => Array.isArray(v) ? v : []).withDefault([]))
   const [perPage] = useQueryState("perPage", parseAsInteger.withDefault(10))
   const [timeRange, setTimeRange] = useQueryState("range", parseAsString.withDefault("all"))
 
@@ -101,6 +102,11 @@ export default function Home() {
   const handleRefresh = () => {
     // Re-fetch data by forcing a window reload
     window.location.reload()
+  }
+
+  const handleThreadIdClick = (threadId: string) => {
+    // Set filter for thread_id with history push
+    setFilters([{id: "thread_id", value: threadId, variant: "text", operator: "eq", filterId: generateId({ length: 8 })}], { history: "push" })
   }
 
   const handleBulkAction = async (action: "reenqueue" | "skip", isAllSelected: boolean, selectedIds: number[]) => {
@@ -200,6 +206,7 @@ export default function Home() {
           pageCount={pageCount}
           rowCount={rowCount}
           onBulkAction={handleBulkAction}
+          onThreadIdClick={handleThreadIdClick}
         />
       </div>
     </div>
