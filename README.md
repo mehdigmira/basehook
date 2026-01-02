@@ -1,6 +1,6 @@
 # Basehook
 
-A webhook management system that groups updates by thread ID and lets you consume them either one-by-one or buffered (latest revision only).
+Transform any push-based system into pull-based one. Basehook handles bufferization, and concurrency for you, so you can just start consuming payloads. It also offers a UI for inspecting and replaying events.
 
 [![Demo Video](https://github.com/user-attachments/assets/7c12a04b-ed04-4962-8c48-d7111a787c91)](https://www.youtube.com/watch?v=qddNp3lVBGI)
 
